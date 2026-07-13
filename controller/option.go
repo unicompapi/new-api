@@ -75,12 +75,39 @@ func buildCompletionRatioMetaValue(optionValues map[string]string) string {
 	return string(jsonBytes)
 }
 
+// effectiveRatioOptionValue returns the runtime-effective JSON for ratio/pricing
+// options. OptionMap stores the raw DB overlay; admin UI needs the merged view
+// (code defaults + DB overrides) so built-in models like viduq3-* are searchable.
+func effectiveRatioOptionValue(key, raw string) string {
+	switch key {
+	case "ModelPrice":
+		return ratio_setting.ModelPrice2JSONString()
+	case "ModelRatio":
+		return ratio_setting.ModelRatio2JSONString()
+	case "CacheRatio":
+		return ratio_setting.CacheRatio2JSONString()
+	case "CreateCacheRatio":
+		return ratio_setting.CreateCacheRatio2JSONString()
+	case "CompletionRatio":
+		return ratio_setting.CompletionRatio2JSONString()
+	case "ImageRatio":
+		return ratio_setting.ImageRatio2JSONString()
+	case "AudioRatio":
+		return ratio_setting.AudioRatio2JSONString()
+	case "AudioCompletionRatio":
+		return ratio_setting.AudioCompletionRatio2JSONString()
+	default:
+		return raw
+	}
+}
+
 func GetOptions(c *gin.Context) {
 	var options []*model.Option
 	optionValues := make(map[string]string)
 	common.OptionMapRWMutex.Lock()
 	for k, v := range common.OptionMap {
-		value := common.Interface2String(v)
+		raw := common.Interface2String(v)
+		value := raw
 		isSensitiveKey := strings.HasSuffix(k, "Token") ||
 			strings.HasSuffix(k, "Secret") ||
 			strings.HasSuffix(k, "Key") ||
@@ -89,16 +116,17 @@ func GetOptions(c *gin.Context) {
 		if isSensitiveKey {
 			continue
 		}
-		options = append(options, &model.Option{
-			Key:   k,
-			Value: value,
-		})
 		for _, optionKey := range completionRatioMetaOptionKeys {
 			if optionKey == k {
+				value = effectiveRatioOptionValue(k, raw)
 				optionValues[k] = value
 				break
 			}
 		}
+		options = append(options, &model.Option{
+			Key:   k,
+			Value: value,
+		})
 	}
 	common.OptionMapRWMutex.Unlock()
 	options = append(options, &model.Option{

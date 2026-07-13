@@ -81,3 +81,9 @@ type TaskAdaptor interface {
 type OpenAIVideoConverter interface {
 	ConvertToOpenAIVideo(originTask *model.Task) ([]byte, error)
 }
+
+// TaskSubmitQuotaSettler allows adaptors to settle submit billing with an exact
+// quota instead of ratio-based recalc (avoids int truncation drift).
+type TaskSubmitQuotaSettler interface {
+	SettleSubmitQuota(info *relaycommon.RelayInfo, taskData []byte) (quota int, otherRatios map[string]float64, ok bool)
+}

@@ -229,7 +229,7 @@ const APP_TEMPLATES: Array<
 const PROFILE_BY_NAME = (name: string) => {
   const n = name.toLowerCase()
   if (/embed|rerank/.test(n)) return 'embedding'
-  if (/image|sora|veo|kling|pika|jimeng|dalle|imagen/.test(n)) return 'image'
+  if (/image|sora|veo|kling|pika|jimeng|dalle|imagen|vidu/.test(n)) return 'image'
   if (/whisper|tts|voice|audio/.test(n)) return 'audio'
   if (/o1|o3|o4|reasoning|thinking|deepseek-r/.test(n)) return 'reasoning'
   if (/flash|haiku|mini|small|nano|fast/.test(n)) return 'fast'
@@ -775,7 +775,7 @@ function apiCategoryOf(model: PricingModel): ApiCategory {
   const profile = PROFILE_BY_NAME(model.model_name)
   if (profile === 'embedding' || profile === 'reasoning') return profile
   if (profile === 'image') {
-    return /sora|veo|kling|pika|video|wan-|hunyuanvideo/i.test(model.model_name)
+    return /sora|veo|kling|pika|video|wan-|hunyuanvideo|vidu/i.test(model.model_name)
       ? 'video'
       : 'image'
   }

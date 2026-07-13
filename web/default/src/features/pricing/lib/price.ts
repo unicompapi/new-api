@@ -122,7 +122,17 @@ function hasRatio(value: number | null | undefined): boolean {
 }
 
 function isCNYModelPrice(model: PricingModel): boolean {
-  return model.model_name.toLowerCase().includes('happyhorse')
+  const n = model.model_name.toLowerCase()
+  return (
+    n.includes('happyhorse') ||
+    n.startsWith('viduq3') ||
+    n.startsWith('kling-v3')
+  )
+}
+
+/** CNY per-second video models (viduq3, kling-v3, happyhorse). */
+export function isPerSecondCNYModel(model: PricingModel): boolean {
+  return isCNYModelPrice(model)
 }
 
 /** Convert stored model price to USD for quota/display pipeline. */
