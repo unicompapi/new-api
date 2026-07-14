@@ -39,6 +39,13 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	other["is_task"] = true
 	other["request_path"] = c.Request.URL.Path
 	other["model_price"] = info.PriceData.ModelPrice
+	if len(info.PriceData.OtherRatios) > 0 {
+		for k, v := range info.PriceData.OtherRatios {
+			if v != 1.0 {
+				other[k] = v
+			}
+		}
+	}
 	if info.PriceData.ModelRatio > 0 {
 		other["model_ratio"] = info.PriceData.ModelRatio
 	}

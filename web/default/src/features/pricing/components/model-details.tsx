@@ -62,7 +62,7 @@ import {
 import { parseTags } from '../lib/filters'
 import { getAvailableGroups, isTokenBasedModel } from '../lib/model-helpers'
 import { inferModelMetadata } from '../lib/model-metadata'
-import { formatFixedPrice, formatGroupPrice } from '../lib/price'
+import { formatFixedPrice, formatGroupPrice, isPerSecondCNYModel } from '../lib/price'
 import type {
   Modality,
   ModelCapability,
@@ -483,7 +483,7 @@ function PriceSection(props: {
         <SectionTitle>{t('Base Price')}</SectionTitle>
         <div className='flex items-baseline justify-between'>
           <span className='text-muted-foreground text-sm'>
-            {t('Per request')}
+            {t(isPerSecondCNYModel(props.model) ? 'Per second' : 'Per request')}
           </span>
           <span className='text-foreground font-mono text-sm font-semibold tabular-nums'>
             {formatFixedPrice(

@@ -325,6 +325,19 @@ var defaultModelPrice = map[string]float64{
 	// kling v3 视频：固定单价为 720P 下每秒人民币价格（元/秒），非美元；计费时自动按汇率换算
 	// 720P: ¥0.8/s (baseline)，1080P: ¥1.0/s (×1.25)
 	"kling-v3-turbo": 0.8,
+	// vidu q3 视频：固定单价为 720P 错峰下每秒人民币价格（元/秒），非美元；计费时自动按汇率换算。
+	// 1 积分 = ¥0.03125（¥500 = 16000 积分）。最终扣费由上游 credits 精确结算。
+	// 预扣分辨率/峰值系数见 relay/channel/task/vidu/adaptor.go viduOfficialCreditRate。
+	//
+	// 文生/图生/首尾帧（720p 错峰 credits/s → ¥/s）：
+	//   viduq3-pro:      10 → 0.3125    viduq3-turbo: 6 → 0.1875    viduq3-pro-fast: 6 → 0.1875
+	// 参考生视频（720p 错峰 credits/s → ¥/s）：
+	//   viduq3:          6  → 0.1875    viduq3-turbo: 5 → 0.15625   viduq3-mix: 24 → 0.75（无错峰，按峰值）
+	"viduq3-pro":      0.3125,
+	"viduq3-turbo":    0.1875, // 文生/图生/首尾帧 720p 错峰基准；参考生实际为 5c/s，由 credits 结算
+	"viduq3-pro-fast": 0.1875,
+	"viduq3":          0.1875, // 参考生 720p 错峰 6c/s
+	"viduq3-mix":      0.75,   // 参考生 720p 峰值 24c/s，不支持错峰
 	// 豆包 Seedream 图片生成：固定单价（每张图片），计费单位与系统 quota 一致，不做汇率换算
 	"doubao-seedream-3-0":      0.22,
 	"doubao-seedream-4-0-250828": 0.22,
@@ -386,16 +399,35 @@ func ModelPrice2JSONString() string {
 }
 
 func UpdateModelPriceByJSONString(jsonStr string) error {
-	return types.LoadFromJsonStringWithCallback(modelPriceMap, jsonStr, InvalidateExposedDataCache)
+	// Parse the JSON from the database.
+	var overlay map[string]float64
+	if err := common.Unmarshal([]byte(jsonStr), &overlay); err != nil {
+		return err
+	}
+	// Merge: seed with code defaults so newly-added models are always available,
+	// then overlay with admin-configured DB values (DB wins on conflict).
+	merged := make(map[string]float64, len(defaultModelPrice)+len(overlay))
+	for k, v := range defaultModelPrice {
+		merged[k] = v
+	}
+	for k, v := range overlay {
+		merged[k] = v
+	}
+	modelPriceMap.Clear()
+	modelPriceMap.AddAll(merged)
+	InvalidateExposedDataCache()
+	return nil
 }
 
 // IsCNYModelPrice reports whether model price is stored in CNY rather than USD.
 // happyhorse models store CNY per second (720P baseline).
 // kling-v3 models store CNY per second (720P baseline).
+// viduq3 models store CNY per second (720P baseline).
 func IsCNYModelPrice(name string) bool {
 	lower := strings.ToLower(FormatMatchingModelName(name))
 	return strings.Contains(lower, "happyhorse") ||
-		strings.HasPrefix(lower, "kling-v3")
+		strings.HasPrefix(lower, "kling-v3") ||
+		strings.HasPrefix(lower, "viduq3")
 }
 
 // ModelPriceToUSD converts stored model price to USD for quota calculation.
