@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 /**
  * Type definitions for usage logs
  */
-import type { UsageLog } from './data/schema'
+import type { UsageLog } from './usage-log-schema'
 
 // ============================================================================
 // Log Category Types
@@ -205,6 +205,7 @@ export interface LogStatistics {
 // ============================================================================
 
 export interface MidjourneyLog {
+  [key: string]: unknown
   id: number
   user_id: number
   channel_id: number
@@ -233,6 +234,7 @@ export interface MidjourneyLog {
 // ============================================================================
 
 export interface TaskLog {
+  [key: string]: unknown
   id: number
   user_id: number
   username?: string
@@ -246,6 +248,7 @@ export interface TaskLog {
   progress_message_en?: string
   data?: string // JSON string
   fail_reason?: string
+  result_url?: string
   status: string // NOT_START, SUBMITTED, IN_PROGRESS, SUCCESS, FAILURE, QUEUED, UNKNOWN
   other?: string
   created_at?: number
