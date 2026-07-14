@@ -267,13 +267,9 @@ function TaskLogsCard<TData>({
           primaryOnly
         />
         <SummaryField
-          label={t('Preview')}
-          cell={cells.get('preview')}
-        />
-        <SummaryField
-          label={t('Details')}
+          label={t('Result')}
           cell={cells.get('fail_reason')}
-          className='bg-transparent px-0 py-0'
+          className='col-span-2 bg-transparent px-0 py-0'
         />
       </div>
     </div>

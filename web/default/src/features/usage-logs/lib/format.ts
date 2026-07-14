@@ -23,7 +23,7 @@ import {
   parseTiersFromExpr,
   type ParsedTier,
 } from '@/features/pricing/lib/billing-expr'
-import type { UsageLog } from '../usage-log-schema'
+import type { UsageLog } from '../data/schema'
 import type { LogOtherData } from '../types'
 
 export { normalizeTierLabel }
