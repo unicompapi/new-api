@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import {
   Bot,
   Download,
@@ -37,8 +38,8 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { getWindowsDownloadCount } from './api'
 import {
-  UNICOMP_AI_DOWNLOAD_URL,
   UNICOMP_AI_EXECUTABLE,
   UNICOMP_AI_INSTALLER_NAME,
   UNICOMP_AI_VERSION,
@@ -48,6 +49,10 @@ const FEATURE_ICONS = [Package, Bot, Video, MessageSquare, MessagesSquare] as co
 
 export function DownloadPage() {
   const { t } = useTranslation()
+  const { data: downloadCount = 0 } = useQuery({
+    queryKey: ['windows-download-count'],
+    queryFn: getWindowsDownloadCount,
+  })
 
   const features = [
     {
@@ -123,24 +128,23 @@ export function DownloadPage() {
           </div>
 
           <div className='flex flex-col items-center gap-3'>
-            <Button
-              size='lg'
-              className='h-11 min-w-52 gap-2 px-6 text-base'
-              render={
-                <a
-                  href={UNICOMP_AI_DOWNLOAD_URL}
-                  download={UNICOMP_AI_INSTALLER_NAME}
-                  rel='noopener noreferrer'
-                />
-              }
-            >
-              <Download className='size-5' />
-              {t('Download for Windows')}
-            </Button>
+            <form action='/api/download/windows' method='post'>
+              <Button
+                type='submit'
+                size='lg'
+                className='h-11 min-w-52 gap-2 px-6 text-base'
+              >
+                <Download className='size-5' />
+                {t('Download for Windows')}
+              </Button>
+            </form>
             <p className='text-muted-foreground text-sm'>
               {t('Version {{version}}', { version: UNICOMP_AI_VERSION })}
               {' · '}
               {UNICOMP_AI_INSTALLER_NAME}
+            </p>
+            <p className='text-muted-foreground text-xs'>
+              累计下载 {downloadCount.toLocaleString()} 次
             </p>
           </div>
 
