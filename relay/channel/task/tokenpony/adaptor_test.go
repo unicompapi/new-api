@@ -3,17 +3,21 @@ package tokenpony
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -68,7 +72,7 @@ func TestUnifiedFrameRetryJSONMapsFirstFrameToFirstImage(t *testing.T) {
 		"generate_audio":true,
 		"content":[
 			{"type":"text","text":"retry shot"},
-			{"type":"image_url","role":"first_frame","image_url":{"url":"https://aigc.example/storyboard.png"}}
+			{"type":"image_url","role":"first_frame","image_url":{"url":"https://cdn.example/input.png"}}
 		]
 	}`), &req))
 	payload, err := convertRequest(&req, req.Model)
@@ -98,7 +102,8 @@ func TestValidateRequestModelBoundaries(t *testing.T) {
 		{"2.0 first frame arbitrary ratio", func(p *requestPayload) {
 			p.Media = []relaycommon.TaskMediaItem{{Type: "first_image", URL: "https://cdn.example/a.jpg"}}
 		}, ""},
-		{"invalid resolution case", func(p *requestPayload) { p.Resolution = "720p" }, "invalid resolution"},
+		{"lowercase resolution", func(p *requestPayload) { p.Resolution = "720p" }, ""},
+		{"invalid resolution", func(p *requestPayload) { p.Resolution = "2K" }, "invalid resolution"},
 		{"invalid asset id", func(p *requestPayload) {
 			p.Media = []relaycommon.TaskMediaItem{{Type: "reference_image", URL: "asset://bad id"}}
 		}, "url must be"},
@@ -302,4 +307,165 @@ func TestBuildRequestSerializesDocumentedCreatePayload(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, bytes.Contains(data, []byte(`"model":"doubao-seedance-2-0-260128"`)))
 	assert.True(t, bytes.Contains(data, []byte(`"resolution":"1080P"`)))
+}
+
+func TestOpenAIVideosMultipartTextAndSingleReferenceReachTokenPonyPayload(t *testing.T) {
+	oldDir := constant.TaskMediaDir
+	oldAddress := system_setting.ServerAddress
+	constant.TaskMediaDir = t.TempDir()
+	system_setting.ServerAddress = "https://gateway.example"
+	t.Cleanup(func() {
+		constant.TaskMediaDir = oldDir
+		system_setting.ServerAddress = oldAddress
+	})
+
+	t.Run("text to video", func(t *testing.T) {
+		ctx := multipartVideoContext(t, map[string]string{
+			"model": ModelSeedance20, "prompt": "clouds moving", "seconds": "4", "size": "1280x720",
+		}, nil)
+		info := tokenPonyTestRelayInfo()
+		require.Nil(t, (&TaskAdaptor{}).ValidateRequestAndSetAction(ctx, info))
+		body, err := (&TaskAdaptor{}).BuildRequestBody(ctx, info)
+		require.NoError(t, err)
+		var payload requestPayload
+		require.NoError(t, common.DecodeJson(body, &payload))
+		assert.Equal(t, "16:9", payload.Ratio)
+		assert.Equal(t, "720P", payload.Resolution)
+		assert.Empty(t, payload.Media)
+	})
+
+	t.Run("single input reference", func(t *testing.T) {
+		ctx := multipartVideoContext(t, map[string]string{
+			"model": ModelSeedance25, "prompt": "animate the reference", "seconds": "4", "size": "720x1280",
+		}, [][]byte{[]byte("\x89PNG\r\n\x1a\nfixture")})
+		info := tokenPonyTestRelayInfo()
+		require.Nil(t, (&TaskAdaptor{}).ValidateRequestAndSetAction(ctx, info))
+		t.Cleanup(func() { service.RemoveTaskInputMedia(info.InputMediaFile) })
+
+		body, err := (&TaskAdaptor{}).BuildRequestBody(ctx, info)
+		require.NoError(t, err)
+		var payload requestPayload
+		require.NoError(t, common.DecodeJson(body, &payload))
+		require.Len(t, payload.Media, 1)
+		assert.Equal(t, "reference_image", payload.Media[0].Type)
+		assert.True(t, strings.HasPrefix(payload.Media[0].URL, "https://gateway.example/v1/video-inputs/"))
+		assert.Equal(t, "9:16", payload.Ratio)
+		assert.Equal(t, "720P", payload.Resolution)
+	})
+}
+
+func TestOpenAIVideosMultipartRejectsUnsafeInputReference(t *testing.T) {
+	oldDir := constant.TaskMediaDir
+	oldAddress := system_setting.ServerAddress
+	constant.TaskMediaDir = t.TempDir()
+	system_setting.ServerAddress = "https://gateway.example"
+	t.Cleanup(func() {
+		constant.TaskMediaDir = oldDir
+		system_setting.ServerAddress = oldAddress
+	})
+	fields := map[string]string{"model": ModelSeedance20, "prompt": "test", "seconds": "4"}
+
+	t.Run("multiple files", func(t *testing.T) {
+		ctx := multipartVideoContext(t, fields, [][]byte{[]byte("\x89PNG\r\n\x1a\none"), []byte("\x89PNG\r\n\x1a\ntwo")})
+		taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(ctx, tokenPonyTestRelayInfo())
+		require.NotNil(t, taskErr)
+		assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+		assert.Contains(t, taskErr.Message, "exactly one")
+	})
+
+	t.Run("empty file", func(t *testing.T) {
+		ctx := multipartVideoContext(t, fields, [][]byte{{}})
+		taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(ctx, tokenPonyTestRelayInfo())
+		require.NotNil(t, taskErr)
+		assert.Contains(t, taskErr.Message, "must not be empty")
+	})
+
+	t.Run("wrong MIME", func(t *testing.T) {
+		ctx := multipartVideoContext(t, fields, [][]byte{[]byte("plain text")})
+		taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(ctx, tokenPonyTestRelayInfo())
+		require.NotNil(t, taskErr)
+		assert.Contains(t, taskErr.Message, "unsupported MIME type")
+	})
+
+	t.Run("oversized file", func(t *testing.T) {
+		ctx := multipartVideoContext(t, fields, [][]byte{bytes.Repeat([]byte{'x'}, (20<<20)+1)})
+		taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(ctx, tokenPonyTestRelayInfo())
+		require.NotNil(t, taskErr)
+		assert.Contains(t, taskErr.Message, "20 MB limit")
+	})
+
+	t.Run("unreachable public address", func(t *testing.T) {
+		system_setting.ServerAddress = "http://127.0.0.1:3000"
+		defer func() { system_setting.ServerAddress = "https://gateway.example" }()
+		ctx := multipartVideoContext(t, fields, [][]byte{[]byte("\x89PNG\r\n\x1a\nfixture")})
+		taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(ctx, tokenPonyTestRelayInfo())
+		require.NotNil(t, taskErr)
+		assert.Contains(t, taskErr.Message, "public HTTPS")
+	})
+}
+
+func TestOpenAISizeMappingAndResolutionNormalization(t *testing.T) {
+	tests := []struct{ size, ratio, resolution string }{
+		{"1280x720", "16:9", "720P"},
+		{"720x1280", "9:16", "720P"},
+		{"1920x1080", "16:9", "1080P"},
+		{"1080x1920", "9:16", "1080P"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.size, func(t *testing.T) {
+			payload := &requestPayload{Model: ModelSeedance20, Prompt: "test"}
+			require.NoError(t, applyOpenAISize(payload, tc.size))
+			assert.Equal(t, tc.ratio, payload.Ratio)
+			assert.Equal(t, tc.resolution, payload.Resolution)
+		})
+	}
+	for _, value := range []string{"720p", "720P"} {
+		resolution, err := normalizeResolution(value)
+		require.NoError(t, err)
+		assert.Equal(t, "720P", resolution)
+	}
+	require.ErrorContains(t, applyOpenAISize(&requestPayload{}, "1024x1792"), "unsupported size")
+	require.ErrorContains(t, applyOpenAISize(&requestPayload{Resolution: "1080P"}, "1280x720"), "conflicts")
+	_, err := normalizeResolution("1440p")
+	require.ErrorContains(t, err, "invalid resolution")
+}
+
+func TestTaskInitPersistsInputMediaPathForRecovery(t *testing.T) {
+	info := tokenPonyTestRelayInfo()
+	info.InputMediaFile = "inputs/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN"
+	task := model.InitTask("tokenpony", info)
+	assert.Equal(t, info.InputMediaFile, task.PrivateData.InputMediaFile)
+}
+
+func tokenPonyTestRelayInfo() *relaycommon.RelayInfo {
+	return &relaycommon.RelayInfo{
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+		PriceData:     types.PriceData{ModelRatio: 1},
+		ChannelMeta:   &relaycommon.ChannelMeta{},
+	}
+}
+
+func multipartVideoContext(t *testing.T, fields map[string]string, files [][]byte) *gin.Context {
+	t.Helper()
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	for key, value := range fields {
+		require.NoError(t, w.WriteField(key, value))
+	}
+	for i, data := range files {
+		part, err := w.CreateFormFile("input_reference", fmt.Sprintf("reference-%d.png", i))
+		require.NoError(t, err)
+		_, err = part.Write(data)
+		require.NoError(t, err)
+	}
+	require.NoError(t, w.Close())
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", &body)
+	ctx.Request.Header.Set("Content-Type", w.FormDataContentType())
+	storage, err := common.GetBodyStorage(ctx)
+	require.NoError(t, err)
+	ctx.Request.Body = io.NopCloser(storage)
+	t.Cleanup(func() { common.CleanupBodyStorage(ctx) })
+	return ctx
 }

@@ -101,7 +101,38 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
-	return relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionGenerate)
+	if taskErr := relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionGenerate); taskErr != nil {
+		return taskErr
+	}
+	if !strings.HasPrefix(c.GetHeader("Content-Type"), "multipart/form-data") {
+		return nil
+	}
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return service.TaskErrorWrapperLocal(err, "invalid_multipart_form", http.StatusBadRequest)
+	}
+	form, err := common.ParseMultipartFormReusable(c)
+	if err != nil {
+		return service.TaskErrorWrapperLocal(err, "invalid_multipart_form", http.StatusBadRequest)
+	}
+	defer form.RemoveAll()
+	files := form.File["input_reference"]
+	if len(files) == 0 {
+		return nil
+	}
+	if len(files) != 1 {
+		return service.TaskErrorWrapperLocal(errors.New("exactly one input_reference file is supported"), "invalid_input_reference", http.StatusBadRequest)
+	}
+	if info.InputMediaFile == "" {
+		info.InputMediaFile, info.InputMediaURL, err = service.PersistTaskInputImage(files[0])
+		if err != nil {
+			return service.TaskErrorWrapperLocal(err, "invalid_input_reference", http.StatusBadRequest)
+		}
+	}
+	// OpenAI input_reference guides generation; it is not defined as a boundary frame.
+	req.Media = append(req.Media, relaycommon.TaskMediaItem{Type: "reference_image", URL: info.InputMediaURL})
+	c.Set("task_request", req)
+	return nil
 }
 
 func (a *TaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) {
@@ -441,6 +472,9 @@ func convertRequest(req *relaycommon.TaskSubmitReq, modelName string) (*requestP
 	if payload.Resolution == "" {
 		payload.Resolution = strings.TrimSpace(req.Resolution)
 	}
+	if err := applyOpenAISize(&payload, req.Size); err != nil {
+		return nil, err
+	}
 	payload.Media = append(payload.Media, req.Media...)
 	if strings.TrimSpace(req.Image) != "" {
 		payload.Media = append(payload.Media, relaycommon.TaskMediaItem{Type: "reference_image", URL: strings.TrimSpace(req.Image)})
@@ -572,11 +606,42 @@ func validateRequest(payload *requestPayload) error {
 }
 
 func normalizeResolution(value string) (string, error) {
-	value = strings.TrimSpace(value)
+	value = strings.ToUpper(strings.TrimSpace(value))
 	if value == "" || isOneOf(value, "480P", "720P", "1080P") {
 		return value, nil
 	}
 	return "", fmt.Errorf("invalid resolution %q; expected 480P, 720P, or 1080P", value)
+}
+
+func applyOpenAISize(payload *requestPayload, size string) error {
+	size = strings.TrimSpace(size)
+	if size == "" {
+		return nil
+	}
+	type mappedSize struct{ ratio, resolution string }
+	mapping := map[string]mappedSize{
+		"1280x720":  {ratio: "16:9", resolution: "720P"},
+		"720x1280":  {ratio: "9:16", resolution: "720P"},
+		"1920x1080": {ratio: "16:9", resolution: "1080P"},
+		"1080x1920": {ratio: "9:16", resolution: "1080P"},
+	}
+	mapped, ok := mapping[size]
+	if !ok {
+		return fmt.Errorf("unsupported size %q; expected 1280x720, 720x1280, 1920x1080, or 1080x1920", size)
+	}
+	resolution, err := normalizeResolution(payload.Resolution)
+	if err != nil {
+		return err
+	}
+	if resolution != "" && resolution != mapped.resolution {
+		return fmt.Errorf("size %q conflicts with resolution %q", size, payload.Resolution)
+	}
+	if payload.Ratio != "" && payload.Ratio != mapped.ratio {
+		return fmt.Errorf("size %q conflicts with ratio %q", size, payload.Ratio)
+	}
+	payload.Resolution = mapped.resolution
+	payload.Ratio = mapped.ratio
+	return nil
 }
 
 func validateMediaURL(value string) error {

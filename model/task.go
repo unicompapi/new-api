@@ -103,6 +103,7 @@ type TaskPrivateData struct {
 	LastFrameURL      string `json:"last_frame_url,omitempty"`
 	ResultFile        string `json:"result_file,omitempty"`
 	LastFrameFile     string `json:"last_frame_file,omitempty"`
+	InputMediaFile    string `json:"input_media_file,omitempty"`
 	LastPolledAt      int64  `json:"last_polled_at,omitempty"`
 	SubmissionUnknown bool   `json:"submission_unknown,omitempty"`
 	MediaPersistError string `json:"media_persist_error,omitempty"`
@@ -193,6 +194,9 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 		if relayInfo.OriginModelName != "" {
 			properties.OriginModelName = relayInfo.OriginModelName
 		}
+	}
+	if relayInfo != nil && relayInfo.TaskRelayInfo != nil {
+		privateData.InputMediaFile = relayInfo.TaskRelayInfo.InputMediaFile
 	}
 
 	// 使用预生成的公开 ID（如果有），否则新生成

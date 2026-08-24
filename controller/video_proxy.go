@@ -199,6 +199,18 @@ func VideoCancelUnsupported(c *gin.Context) {
 	videoProxyError(c, http.StatusNotImplemented, "not_supported_error", "This upstream does not provide a documented task cancellation endpoint")
 }
 
+func VideoInputMedia(c *gin.Context) {
+	path, contentType, err := service.ResolveTaskInputMedia(c.Param("token"))
+	if err != nil {
+		videoProxyError(c, http.StatusNotFound, "invalid_request_error", "Input media is unavailable")
+		return
+	}
+	c.Header("Content-Type", contentType)
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	http.ServeFile(c.Writer, c.Request, path)
+}
+
 func servePersistedTaskMedia(c *gin.Context, relativePath, contentType string) {
 	path, err := service.ResolveTaskMediaFile(relativePath)
 	if err != nil {
