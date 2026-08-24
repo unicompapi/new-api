@@ -187,6 +187,13 @@ export const channelFormSchema = z
     vertex_key_type: z.enum(['json', 'api_key']).optional(), // Vertex AI specific
     aws_key_type: z.enum(['ak_sk', 'api_key']).optional(), // AWS specific
     azure_responses_version: z.string().optional(), // Azure specific
+    tokenpony_http_timeout_seconds: z.number().int().min(1).max(600).optional(),
+    tokenpony_poll_interval_seconds: z
+      .number()
+      .int()
+      .min(1)
+      .max(300)
+      .optional(),
     // Field passthrough controls (stored in settings JSON)
     allow_service_tier: z.boolean().optional(), // OpenAI/Anthropic
     disable_store: z.boolean().optional(), // OpenAI only
@@ -305,6 +312,8 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   vertex_key_type: 'json',
   aws_key_type: 'ak_sk',
   azure_responses_version: '',
+  tokenpony_http_timeout_seconds: 30,
+  tokenpony_poll_interval_seconds: 15,
   // Field passthrough controls
   allow_service_tier: false,
   disable_store: false,
@@ -370,6 +379,8 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
+  let tokenPonyHTTPTimeoutSeconds = 30
+  let tokenPonyPollIntervalSeconds = 15
 
   if (channel.settings) {
     try {
@@ -394,6 +405,10 @@ export function transformChannelToFormDefaults(
       )
         ? parsed.upstream_model_update_ignored_models.join(',')
         : ''
+      tokenPonyHTTPTimeoutSeconds =
+        Number(parsed.tokenpony_http_timeout_seconds) || 30
+      tokenPonyPollIntervalSeconds =
+        Number(parsed.tokenpony_poll_interval_seconds) || 15
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('Failed to parse channel settings:', error)
@@ -443,6 +458,8 @@ export function transformChannelToFormDefaults(
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
+    tokenpony_http_timeout_seconds: tokenPonyHTTPTimeoutSeconds,
+    tokenpony_poll_interval_seconds: tokenPonyPollIntervalSeconds,
   }
 }
 
@@ -503,6 +520,16 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     settingsObj.aws_key_type = formData.aws_key_type || 'ak_sk'
   } else if ('aws_key_type' in settingsObj) {
     delete settingsObj.aws_key_type
+  }
+
+  if (formData.type === 58) {
+    settingsObj.tokenpony_http_timeout_seconds =
+      formData.tokenpony_http_timeout_seconds || 30
+    settingsObj.tokenpony_poll_interval_seconds =
+      formData.tokenpony_poll_interval_seconds || 15
+  } else {
+    delete settingsObj.tokenpony_http_timeout_seconds
+    delete settingsObj.tokenpony_poll_interval_seconds
   }
 
   // Field passthrough controls:

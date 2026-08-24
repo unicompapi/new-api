@@ -97,9 +97,15 @@ func (m Properties) Value() (driver.Value, error) {
 }
 
 type TaskPrivateData struct {
-	Key            string `json:"key,omitempty"`
-	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
-	ResultURL      string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
+	Key               string `json:"key,omitempty"`
+	UpstreamTaskID    string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
+	ResultURL         string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
+	LastFrameURL      string `json:"last_frame_url,omitempty"`
+	ResultFile        string `json:"result_file,omitempty"`
+	LastFrameFile     string `json:"last_frame_file,omitempty"`
+	LastPolledAt      int64  `json:"last_polled_at,omitempty"`
+	SubmissionUnknown bool   `json:"submission_unknown,omitempty"`
+	MediaPersistError string `json:"media_persist_error,omitempty"`
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
 	BillingSource  string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
 	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
@@ -133,6 +139,10 @@ func (t *Task) GetResultURL() string {
 		return t.PrivateData.ResultURL
 	}
 	return t.FailReason
+}
+
+func (t *Task) GetLastFrameURL() string {
+	return t.PrivateData.LastFrameURL
 }
 
 // GenerateTaskID 生成对外暴露的 task_xxxx 格式 ID
@@ -364,13 +374,18 @@ func (Task *Task) Insert() error {
 }
 
 type taskSnapshot struct {
-	Status     TaskStatus
-	Progress   string
-	StartTime  int64
-	FinishTime int64
-	FailReason string
-	ResultURL  string
-	Data       json.RawMessage
+	Status            TaskStatus
+	Progress          string
+	StartTime         int64
+	FinishTime        int64
+	FailReason        string
+	ResultURL         string
+	LastFrameURL      string
+	ResultFile        string
+	LastFrameFile     string
+	LastPolledAt      int64
+	MediaPersistError string
+	Data              json.RawMessage
 }
 
 func (s taskSnapshot) Equal(other taskSnapshot) bool {
@@ -380,18 +395,28 @@ func (s taskSnapshot) Equal(other taskSnapshot) bool {
 		s.FinishTime == other.FinishTime &&
 		s.FailReason == other.FailReason &&
 		s.ResultURL == other.ResultURL &&
+		s.LastFrameURL == other.LastFrameURL &&
+		s.ResultFile == other.ResultFile &&
+		s.LastFrameFile == other.LastFrameFile &&
+		s.LastPolledAt == other.LastPolledAt &&
+		s.MediaPersistError == other.MediaPersistError &&
 		bytes.Equal(s.Data, other.Data)
 }
 
 func (t *Task) Snapshot() taskSnapshot {
 	return taskSnapshot{
-		Status:     t.Status,
-		Progress:   t.Progress,
-		StartTime:  t.StartTime,
-		FinishTime: t.FinishTime,
-		FailReason: t.FailReason,
-		ResultURL:  t.PrivateData.ResultURL,
-		Data:       t.Data,
+		Status:            t.Status,
+		Progress:          t.Progress,
+		StartTime:         t.StartTime,
+		FinishTime:        t.FinishTime,
+		FailReason:        t.FailReason,
+		ResultURL:         t.PrivateData.ResultURL,
+		LastFrameURL:      t.PrivateData.LastFrameURL,
+		ResultFile:        t.PrivateData.ResultFile,
+		LastFrameFile:     t.PrivateData.LastFrameFile,
+		LastPolledAt:      t.PrivateData.LastPolledAt,
+		MediaPersistError: t.PrivateData.MediaPersistError,
+		Data:              t.Data,
 	}
 }
 

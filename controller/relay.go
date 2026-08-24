@@ -593,6 +593,13 @@ func RelayTask(c *gin.Context) {
 		task.Quota = result.Quota
 		task.Data = result.TaskData
 		task.Action = relayInfo.Action
+		if result.SubmissionUnknown {
+			task.Status = model.TaskStatusUnknown
+			task.Progress = "100%"
+			task.FinishTime = time.Now().Unix()
+			task.FailReason = result.UnknownReason
+			task.PrivateData.SubmissionUnknown = true
+		}
 		if insertErr := task.Insert(); insertErr != nil {
 			common.SysError("insert task error: " + insertErr.Error())
 		}
@@ -607,6 +614,9 @@ func RelayTask(c *gin.Context) {
 // CNY per-second models (viduq3, kling-v3, happyhorse) use model price × duration
 // and settle actual usage from upstream on task complete.
 func taskPerCallBilling(info *relaycommon.RelayInfo) bool {
+	if info.ChannelType == constant.ChannelTypeTokenPony {
+		return false
+	}
 	if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) {
 		return true
 	}

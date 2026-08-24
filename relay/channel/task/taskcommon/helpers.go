@@ -66,6 +66,10 @@ func BuildProxyURL(taskID string) string {
 	return fmt.Sprintf("%s/v1/videos/%s/content", system_setting.ServerAddress, taskID)
 }
 
+func BuildLastFrameProxyURL(taskID string) string {
+	return fmt.Sprintf("%s/v1/videos/%s/last_frame", system_setting.ServerAddress, taskID)
+}
+
 // Status-to-progress mapping constants for polling updates.
 const (
 	ProgressSubmitted  = "10%"

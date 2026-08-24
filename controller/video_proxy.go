@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -52,6 +53,10 @@ func VideoProxy(c *gin.Context) {
 	if task.Status != model.TaskStatusSuccess {
 		videoProxyError(c, http.StatusBadRequest, "invalid_request_error",
 			fmt.Sprintf("Task is not completed yet, current status: %s", task.Status))
+		return
+	}
+	if task.PrivateData.ResultFile != "" {
+		servePersistedTaskMedia(c, task.PrivateData.ResultFile, "video/mp4")
 		return
 	}
 
@@ -169,6 +174,45 @@ func VideoProxy(c *gin.Context) {
 	if _, err = io.Copy(c.Writer, resp.Body); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream video content: %s", err.Error()))
 	}
+}
+
+func VideoLastFrameProxy(c *gin.Context) {
+	taskID := c.Param("task_id")
+	userID := c.GetInt("id")
+	task, exists, err := model.GetByTaskId(userID, taskID)
+	if err != nil {
+		videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to query task")
+		return
+	}
+	if !exists || task == nil {
+		videoProxyError(c, http.StatusNotFound, "invalid_request_error", "Task not found")
+		return
+	}
+	if task.Status != model.TaskStatusSuccess {
+		videoProxyError(c, http.StatusBadRequest, "invalid_request_error", "Task is not completed")
+		return
+	}
+	servePersistedTaskMedia(c, task.PrivateData.LastFrameFile, "image/jpeg")
+}
+
+func VideoCancelUnsupported(c *gin.Context) {
+	videoProxyError(c, http.StatusNotImplemented, "not_supported_error", "This upstream does not provide a documented task cancellation endpoint")
+}
+
+func servePersistedTaskMedia(c *gin.Context, relativePath, contentType string) {
+	path, err := service.ResolveTaskMediaFile(relativePath)
+	if err != nil {
+		videoProxyError(c, http.StatusNotFound, "server_error", "Persisted media is unavailable")
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		videoProxyError(c, http.StatusNotFound, "server_error", "Persisted media is unavailable")
+		return
+	}
+	c.Header("Content-Type", contentType)
+	c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	http.ServeFile(c.Writer, c.Request, path)
 }
 
 func writeVideoDataURL(c *gin.Context, dataURL string) error {

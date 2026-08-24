@@ -160,6 +160,8 @@ type RelayInfo struct {
 	// http.Request.ContentLength manually (net/http only auto-detects it for
 	// *bytes.Reader/Buffer/strings.Reader). 0 means "let net/http decide".
 	UpstreamRequestBodySize int64
+	// UpstreamRequestTimeoutSeconds overrides the shared relay timeout for one request.
+	UpstreamRequestTimeoutSeconds int
 
 	PriceData types.PriceData
 
@@ -685,6 +687,11 @@ type TaskMediaURL struct {
 	URL string `json:"url,omitempty"`
 }
 
+type TaskMediaItem struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
 // TaskContentItem mirrors Seedance / Volcengine video content entries.
 type TaskContentItem struct {
 	Type     string        `json:"type,omitempty"`
@@ -701,6 +708,7 @@ type TaskSubmitReq struct {
 	Mode           string                 `json:"mode,omitempty"`
 	Image          string                 `json:"image,omitempty"`
 	Images         []string               `json:"images,omitempty"`
+	Media          []TaskMediaItem        `json:"media,omitempty"`
 	Content        []TaskContentItem      `json:"content,omitempty"`
 	Size           string                 `json:"size,omitempty"`
 	Resolution     string                 `json:"resolution,omitempty"`
@@ -1096,6 +1104,8 @@ type TaskInfo struct {
 	Reason           string `json:"reason,omitempty"`
 	Url              string `json:"url,omitempty"`
 	RemoteUrl        string `json:"remote_url,omitempty"`
+	LastFrameURL     string `json:"last_frame_url,omitempty"`
+	PersistResult    bool   `json:"persist_result,omitempty"`
 	Progress         string `json:"progress,omitempty"`
 	CompletionTokens int    `json:"completion_tokens,omitempty"` // 用于按倍率计费
 	TotalTokens      int    `json:"total_tokens,omitempty"`      // 用于按倍率计费
