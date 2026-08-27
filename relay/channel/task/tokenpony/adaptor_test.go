@@ -3,11 +3,14 @@ package tokenpony
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -433,8 +436,99 @@ func TestOpenAISizeMappingAndResolutionNormalization(t *testing.T) {
 func TestTaskInitPersistsInputMediaPathForRecovery(t *testing.T) {
 	info := tokenPonyTestRelayInfo()
 	info.InputMediaFile = "inputs/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN"
+	info.InputMediaFiles = []string{"inputs/1234567890123456789012345678901234567890"}
 	task := model.InitTask("tokenpony", info)
 	assert.Equal(t, info.InputMediaFile, task.PrivateData.InputMediaFile)
+	assert.Equal(t, info.InputMediaFiles, task.PrivateData.InputMediaFiles)
+}
+
+func TestBase64ImagesBecomeRecoverableCapabilityURLs(t *testing.T) {
+	oldDir := constant.TaskMediaDir
+	oldAddress := system_setting.ServerAddress
+	constant.TaskMediaDir = t.TempDir()
+	system_setting.ServerAddress = "https://gateway.example"
+	t.Cleanup(func() {
+		constant.TaskMediaDir = oldDir
+		system_setting.ServerAddress = oldAddress
+	})
+
+	dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nfixture"))
+	secondDataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nsecond-fixture"))
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	ctx.Set("task_request", relaycommon.TaskSubmitReq{
+		Model:  ModelSeedance25,
+		Prompt: "animate references",
+		Content: []relaycommon.TaskContentItem{
+			{Type: "image_url", Role: "first_frame", ImageURL: &relaycommon.TaskMediaURL{URL: dataURI}},
+		},
+		Media:  []relaycommon.TaskMediaItem{{Type: "reference_image", URL: dataURI}},
+		Images: []string{secondDataURI},
+		Metadata: map[string]any{
+			"ratio":      "adaptive",
+			"resolution": "720P",
+		},
+	})
+	info := tokenPonyTestRelayInfo()
+
+	body, err := (&TaskAdaptor{}).BuildRequestBody(ctx, info)
+	require.NoError(t, err)
+	bodyBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	assert.NotContains(t, string(bodyBytes), ";base64,", "base64 payload must not be sent upstream")
+	var payload requestPayload
+	require.NoError(t, common.Unmarshal(bodyBytes, &payload))
+	require.Len(t, payload.Media, 3)
+	assert.Equal(t, "reference_image", payload.Media[0].Type)
+	assert.Equal(t, "reference_image", payload.Media[1].Type)
+	assert.Equal(t, "first_image", payload.Media[2].Type)
+	assert.Equal(t, payload.Media[0].URL, payload.Media[2].URL)
+	assert.NotEqual(t, payload.Media[0].URL, payload.Media[1].URL)
+	assert.True(t, strings.HasPrefix(payload.Media[0].URL, "https://gateway.example/v1/video-inputs/"))
+	require.Len(t, info.InputMediaFiles, 2, "duplicate base64 images should share one temporary file")
+	_, mimeType, err := service.ResolveTaskInputMedia(filepath.Base(info.InputMediaFiles[0]))
+	require.NoError(t, err)
+	assert.Equal(t, "image/png", mimeType)
+
+	_, err = (&TaskAdaptor{}).BuildRequestBody(ctx, info)
+	require.NoError(t, err)
+	assert.Len(t, info.InputMediaFiles, 2, "retries should reuse the same temporary files")
+
+	task := model.InitTask("tokenpony", info)
+	assert.Equal(t, info.InputMediaFiles, task.PrivateData.InputMediaFiles)
+	service.RemoveTaskInputMediaFiles(task.PrivateData.InputMediaFile, task.PrivateData.InputMediaFiles)
+	_, _, err = service.ResolveTaskInputMedia(filepath.Base(info.InputMediaFiles[0]))
+	require.ErrorContains(t, err, "unavailable")
+}
+
+func TestBase64ImageValidationFailureLeavesNoTemporaryFiles(t *testing.T) {
+	oldDir := constant.TaskMediaDir
+	oldAddress := system_setting.ServerAddress
+	constant.TaskMediaDir = t.TempDir()
+	system_setting.ServerAddress = "https://gateway.example"
+	t.Cleanup(func() {
+		constant.TaskMediaDir = oldDir
+		system_setting.ServerAddress = oldAddress
+	})
+
+	dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nfixture"))
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	ctx.Set("task_request", relaycommon.TaskSubmitReq{
+		Model:  ModelSeedance25,
+		Prompt: "invalid boundary ratio",
+		Content: []relaycommon.TaskContentItem{
+			{Type: "image_url", Role: "first_frame", ImageURL: &relaycommon.TaskMediaURL{URL: dataURI}},
+		},
+		Metadata: map[string]any{"ratio": "16:9"},
+	})
+	info := tokenPonyTestRelayInfo()
+	_, err := (&TaskAdaptor{}).BuildRequestBody(ctx, info)
+	require.ErrorContains(t, err, "ratio adaptive")
+	assert.Empty(t, info.InputMediaFiles)
+	entries, readErr := os.ReadDir(filepath.Join(constant.TaskMediaDir, "inputs"))
+	require.NoError(t, readErr)
+	assert.Empty(t, entries)
 }
 
 func tokenPonyTestRelayInfo() *relaycommon.RelayInfo {

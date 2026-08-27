@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"encoding/base64"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -35,6 +36,51 @@ func TestTaskInputMediaPersistsServesAndRemovesCapabilityURL(t *testing.T) {
 	RemoveTaskInputMedia(relative)
 	_, _, err = ResolveTaskInputMedia(token)
 	require.ErrorContains(t, err, "unavailable")
+}
+
+func TestTaskInputMediaPersistsStrictBase64DataURI(t *testing.T) {
+	withTaskInputMediaSettings(t)
+	dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBytes())
+	relative, publicURL, err := PersistTaskInputImageDataURI(dataURI)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(publicURL, "https://gateway.example/v1/video-inputs/"))
+
+	path, mimeType, err := ResolveTaskInputMedia(filepath.Base(relative))
+	require.NoError(t, err)
+	assert.Equal(t, "image/png", mimeType)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, pngBytes(), data)
+
+	RemoveTaskInputMediaFiles("", []string{relative})
+	_, _, err = ResolveTaskInputMedia(filepath.Base(relative))
+	require.ErrorContains(t, err, "unavailable")
+}
+
+func TestTaskInputMediaRejectsUnsafeBase64DataURI(t *testing.T) {
+	withTaskInputMediaSettings(t)
+	png := base64.StdEncoding.EncodeToString(pngBytes())
+
+	for name, value := range map[string]string{
+		"raw base64":     png,
+		"empty":          "data:image/png;base64,",
+		"invalid base64": "data:image/png;base64,%%%",
+		"wrong type":     "data:image/gif;base64," + png,
+		"mime mismatch":  "data:image/jpeg;base64," + png,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := PersistTaskInputImageDataURI(value)
+			require.Error(t, err)
+		})
+	}
+
+	oversized := "data:image/png;base64," + strings.Repeat("A", base64.StdEncoding.EncodedLen(maxTaskInputImageBytes)+1)
+	_, _, err := PersistTaskInputImageDataURI(oversized)
+	require.ErrorContains(t, err, "20 MB limit")
+
+	entries, err := os.ReadDir(filepath.Join(constant.TaskMediaDir, "inputs"))
+	require.NoError(t, err)
+	assert.Empty(t, entries)
 }
 
 func TestTaskInputMediaRejectsEmptyOversizedAndUnsupportedFiles(t *testing.T) {

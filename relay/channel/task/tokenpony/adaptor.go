@@ -3,6 +3,7 @@ package tokenpony
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -160,8 +161,21 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	} else {
 		info.UpstreamModelName = modelName
 	}
-	payload, err := convertRequest(&req, modelName)
+	payload, err := convertRequestPayload(&req, modelName)
 	if err != nil {
+		return nil, err
+	}
+	rollbackInputMedia, err := materializeBase64ImageMedia(payload, info)
+	if err != nil {
+		return nil, err
+	}
+	keepInputMedia := false
+	defer func() {
+		if !keepInputMedia {
+			rollbackInputMedia()
+		}
+	}()
+	if err := validateRequest(payload); err != nil {
 		return nil, err
 	}
 	if err := a.ensureAssetsActive(c.Request.Context(), info, payload); err != nil {
@@ -171,6 +185,7 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	if err != nil {
 		return nil, err
 	}
+	keepInputMedia = true
 	return bytes.NewReader(body), nil
 }
 
@@ -458,6 +473,17 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 }
 
 func convertRequest(req *relaycommon.TaskSubmitReq, modelName string) (*requestPayload, error) {
+	payload, err := convertRequestPayload(req, modelName)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateRequest(payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+func convertRequestPayload(req *relaycommon.TaskSubmitReq, modelName string) (*requestPayload, error) {
 	payload := requestPayload{Model: strings.TrimSpace(modelName), Prompt: strings.TrimSpace(req.Prompt)}
 	if err := taskcommon.UnmarshalMetadata(req.Metadata, &payload); err != nil {
 		return nil, err
@@ -491,10 +517,60 @@ func convertRequest(req *relaycommon.TaskSubmitReq, modelName string) (*requestP
 			payload.Media = append(payload.Media, media)
 		}
 	}
-	if err := validateRequest(&payload); err != nil {
-		return nil, err
-	}
 	return &payload, nil
+}
+
+func materializeBase64ImageMedia(payload *requestPayload, info *relaycommon.RelayInfo) (func(), error) {
+	start := 0
+	if info != nil && info.TaskRelayInfo != nil {
+		start = len(info.InputMediaFiles)
+	}
+	createdKeys := make([]string, 0)
+	rollback := func() {
+		if info == nil || info.TaskRelayInfo == nil {
+			return
+		}
+		for _, relative := range info.InputMediaFiles[start:] {
+			service.RemoveTaskInputMedia(relative)
+		}
+		info.InputMediaFiles = info.InputMediaFiles[:start]
+		for _, key := range createdKeys {
+			delete(info.InputMediaURLs, key)
+		}
+	}
+
+	for i := range payload.Media {
+		media := &payload.Media[i]
+		if media.Type != "reference_image" && media.Type != "first_image" && media.Type != "last_image" {
+			continue
+		}
+		value := strings.TrimSpace(media.URL)
+		if !strings.HasPrefix(strings.ToLower(value), "data:") {
+			continue
+		}
+		if info == nil || info.TaskRelayInfo == nil {
+			rollback()
+			return func() {}, errors.New("task relay info is required for base64 image inputs")
+		}
+		key := fmt.Sprintf("%x", sha256.Sum256([]byte(value)))
+		if publicURL, ok := info.InputMediaURLs[key]; ok {
+			media.URL = publicURL
+			continue
+		}
+		relative, publicURL, err := service.PersistTaskInputImageDataURI(value)
+		if err != nil {
+			rollback()
+			return func() {}, fmt.Errorf("media[%d]: %w", i, err)
+		}
+		if info.InputMediaURLs == nil {
+			info.InputMediaURLs = make(map[string]string)
+		}
+		info.InputMediaURLs[key] = publicURL
+		info.InputMediaFiles = append(info.InputMediaFiles, relative)
+		createdKeys = append(createdKeys, key)
+		media.URL = publicURL
+	}
+	return rollback, nil
 }
 
 func contentToMedia(item relaycommon.TaskContentItem) (relaycommon.TaskMediaItem, bool, error) {

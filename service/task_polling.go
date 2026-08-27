@@ -76,7 +76,7 @@ func sweepTimedOutTasks(ctx context.Context) {
 			logger.LogInfo(ctx, fmt.Sprintf("sweepTimedOutTasks: task %s already transitioned, skip", task.TaskID))
 			continue
 		}
-		RemoveTaskInputMedia(task.PrivateData.InputMediaFile)
+		RemoveTaskInputMediaFiles(task.PrivateData.InputMediaFile, task.PrivateData.InputMediaFiles)
 		timedOutCount++
 		if !isLegacy && task.Quota != 0 {
 			RefundTaskQuota(ctx, task, reason)
@@ -512,7 +512,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 			shouldRefund = false
 			shouldSettle = false
 		} else {
-			RemoveTaskInputMedia(task.PrivateData.InputMediaFile)
+			RemoveTaskInputMediaFiles(task.PrivateData.InputMediaFile, task.PrivateData.InputMediaFiles)
 		}
 	} else if !snap.Equal(task.Snapshot()) {
 		if _, err := task.UpdateWithStatus(snap.Status); err != nil {

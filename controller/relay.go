@@ -506,7 +506,7 @@ func RelayTask(c *gin.Context) {
 			relayInfo.Billing.Refund(c)
 		}
 		if taskErr != nil {
-			service.RemoveTaskInputMedia(relayInfo.InputMediaFile)
+			service.RemoveTaskInputMediaFiles(relayInfo.InputMediaFile, relayInfo.InputMediaFiles)
 		}
 	}()
 
@@ -605,7 +605,7 @@ func RelayTask(c *gin.Context) {
 		}
 		if insertErr := task.Insert(); insertErr != nil {
 			common.SysError("insert task error: " + insertErr.Error())
-			service.RemoveTaskInputMedia(task.PrivateData.InputMediaFile)
+			service.RemoveTaskInputMediaFiles(task.PrivateData.InputMediaFile, task.PrivateData.InputMediaFiles)
 		}
 	}
 

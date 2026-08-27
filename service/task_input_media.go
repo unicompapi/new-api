@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -27,10 +28,6 @@ const (
 var taskInputTokenPattern = regexp.MustCompile(`^[A-Za-z0-9]{40}$`)
 
 func PersistTaskInputImage(fileHeader *multipart.FileHeader) (string, string, error) {
-	publicBase, err := taskInputPublicBaseURL()
-	if err != nil {
-		return "", "", err
-	}
 	if fileHeader == nil || fileHeader.Size == 0 {
 		return "", "", errors.New("input_reference must not be empty")
 	}
@@ -43,6 +40,33 @@ func PersistTaskInputImage(fileHeader *multipart.FileHeader) (string, string, er
 		return "", "", fmt.Errorf("open input_reference: %w", err)
 	}
 	defer source.Close()
+	return persistTaskInputImage(source, "")
+}
+
+func PersistTaskInputImageDataURI(value string) (string, string, error) {
+	header, payload, ok := strings.Cut(value, ",")
+	if !ok || !strings.HasPrefix(strings.ToLower(header), "data:image/") {
+		return "", "", errors.New("image must be a data:image/...;base64 URI")
+	}
+	mediaType, encoding, ok := strings.Cut(strings.TrimPrefix(strings.ToLower(header), "data:"), ";")
+	if !ok || encoding != "base64" || !isSupportedTaskInputImageType(mediaType) {
+		return "", "", errors.New("base64 image must use image/jpeg, image/png, or image/webp")
+	}
+	if payload == "" {
+		return "", "", errors.New("base64 image must not be empty")
+	}
+	if len(payload) > base64.StdEncoding.EncodedLen(maxTaskInputImageBytes) {
+		return "", "", fmt.Errorf("base64 image exceeds the %d MB limit", maxTaskInputImageBytes>>20)
+	}
+	decoder := base64.NewDecoder(base64.StdEncoding.Strict(), strings.NewReader(payload))
+	return persistTaskInputImage(decoder, mediaType)
+}
+
+func persistTaskInputImage(source io.Reader, declaredMediaType string) (string, string, error) {
+	publicBase, err := taskInputPublicBaseURL()
+	if err != nil {
+		return "", "", err
+	}
 
 	root, err := filepath.Abs(constant.TaskMediaDir)
 	if err != nil {
@@ -86,9 +110,13 @@ func PersistTaskInputImage(fileHeader *multipart.FileHeader) (string, string, er
 		return "", "", err
 	}
 	mimeType := http.DetectContentType(header[:n])
-	if mimeType != "image/jpeg" && mimeType != "image/png" && mimeType != "image/webp" {
+	if !isSupportedTaskInputImageType(mimeType) {
 		_ = temp.Close()
 		return "", "", fmt.Errorf("input_reference has unsupported MIME type %q; expected image/jpeg, image/png, or image/webp", mimeType)
+	}
+	if declaredMediaType != "" && mimeType != declaredMediaType {
+		_ = temp.Close()
+		return "", "", fmt.Errorf("base64 image MIME mismatch: declared %s but detected %s", declaredMediaType, mimeType)
 	}
 	if err := temp.Close(); err != nil {
 		return "", "", err
@@ -107,6 +135,10 @@ func PersistTaskInputImage(fileHeader *multipart.FileHeader) (string, string, er
 		return "", "", err
 	}
 	return relative, publicBase + "/v1/video-inputs/" + token, nil
+}
+
+func isSupportedTaskInputImageType(value string) bool {
+	return value == "image/jpeg" || value == "image/png" || value == "image/webp"
 }
 
 func ResolveTaskInputMedia(token string) (string, string, error) {
@@ -149,6 +181,15 @@ func RemoveTaskInputMedia(relative string) {
 	}
 	if path, err := ResolveTaskMediaFile(clean); err == nil {
 		_ = os.Remove(path)
+	}
+}
+
+func RemoveTaskInputMediaFiles(single string, files []string) {
+	RemoveTaskInputMedia(single)
+	for _, relative := range files {
+		if relative != single {
+			RemoveTaskInputMedia(relative)
+		}
 	}
 }
 

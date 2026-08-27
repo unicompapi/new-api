@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql/driver"
 	"encoding/json"
+	"reflect"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -97,16 +98,17 @@ func (m Properties) Value() (driver.Value, error) {
 }
 
 type TaskPrivateData struct {
-	Key               string `json:"key,omitempty"`
-	UpstreamTaskID    string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
-	ResultURL         string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
-	LastFrameURL      string `json:"last_frame_url,omitempty"`
-	ResultFile        string `json:"result_file,omitempty"`
-	LastFrameFile     string `json:"last_frame_file,omitempty"`
-	InputMediaFile    string `json:"input_media_file,omitempty"`
-	LastPolledAt      int64  `json:"last_polled_at,omitempty"`
-	SubmissionUnknown bool   `json:"submission_unknown,omitempty"`
-	MediaPersistError string `json:"media_persist_error,omitempty"`
+	Key               string   `json:"key,omitempty"`
+	UpstreamTaskID    string   `json:"upstream_task_id,omitempty"` // 上游真实 task ID
+	ResultURL         string   `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
+	LastFrameURL      string   `json:"last_frame_url,omitempty"`
+	ResultFile        string   `json:"result_file,omitempty"`
+	LastFrameFile     string   `json:"last_frame_file,omitempty"`
+	InputMediaFile    string   `json:"input_media_file,omitempty"`
+	InputMediaFiles   []string `json:"input_media_files,omitempty"`
+	LastPolledAt      int64    `json:"last_polled_at,omitempty"`
+	SubmissionUnknown bool     `json:"submission_unknown,omitempty"`
+	MediaPersistError string   `json:"media_persist_error,omitempty"`
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
 	BillingSource  string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
 	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
@@ -161,7 +163,7 @@ func (p *TaskPrivateData) Scan(val interface{}) error {
 }
 
 func (p TaskPrivateData) Value() (driver.Value, error) {
-	if (p == TaskPrivateData{}) {
+	if reflect.ValueOf(p).IsZero() {
 		return nil, nil
 	}
 	return common.Marshal(p)
@@ -197,6 +199,7 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 	}
 	if relayInfo != nil && relayInfo.TaskRelayInfo != nil {
 		privateData.InputMediaFile = relayInfo.TaskRelayInfo.InputMediaFile
+		privateData.InputMediaFiles = append([]string(nil), relayInfo.TaskRelayInfo.InputMediaFiles...)
 	}
 
 	// 使用预生成的公开 ID（如果有），否则新生成
