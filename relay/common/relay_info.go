@@ -678,6 +678,7 @@ type TaskRelayInfo struct {
 	InputMediaURL   string
 	InputMediaFiles []string
 	InputMediaURLs  map[string]string
+	InputMediaAudit string
 
 	ConsumeQuota bool
 

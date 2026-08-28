@@ -74,7 +74,7 @@ func TestTaskInputMediaRejectsUnsafeBase64DataURI(t *testing.T) {
 		})
 	}
 
-	oversized := "data:image/png;base64," + strings.Repeat("A", base64.StdEncoding.EncodedLen(maxTaskInputImageBytes)+1)
+	oversized := "data:image/png;base64," + strings.Repeat("A", base64.StdEncoding.EncodedLen(maxTaskInputMediaBytes)+1)
 	_, _, err := PersistTaskInputImageDataURI(oversized)
 	require.ErrorContains(t, err, "20 MB limit")
 
@@ -94,7 +94,7 @@ func TestTaskInputMediaRejectsEmptyOversizedAndUnsupportedFiles(t *testing.T) {
 	require.ErrorContains(t, err, "unsupported MIME type")
 
 	large := multipartInputFile(t, pngBytes(), "large.png")
-	large.Size = maxTaskInputImageBytes + 1
+	large.Size = maxTaskInputMediaBytes + 1
 	_, _, err = PersistTaskInputImage(large)
 	require.ErrorContains(t, err, "20 MB limit")
 }

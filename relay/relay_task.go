@@ -204,6 +204,15 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		}
 	}
 
+	// TokenPony remote media must be stabilized before any billable state changes.
+	var requestBody io.Reader
+	if info.ChannelType == constant.ChannelTypeTokenPony {
+		requestBody, err = adaptor.BuildRequestBody(c, info)
+		if err != nil {
+			return nil, service.TaskErrorWrapperLocal(err, "invalid_tokenpony_request", http.StatusBadRequest)
+		}
+	}
+
 	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
 	if info.Billing == nil && !info.PriceData.FreeModel {
 		info.ForcePreConsume = true
@@ -213,12 +222,11 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 8. 构建请求体
-	requestBody, err := adaptor.BuildRequestBody(c, info)
-	if err != nil {
-		if info.ChannelType == constant.ChannelTypeTokenPony {
-			return nil, service.TaskErrorWrapperLocal(err, "invalid_tokenpony_request", http.StatusBadRequest)
+	if requestBody == nil {
+		requestBody, err = adaptor.BuildRequestBody(c, info)
+		if err != nil {
+			return nil, service.TaskErrorWrapper(err, "build_request_failed", http.StatusInternalServerError)
 		}
-		return nil, service.TaskErrorWrapper(err, "build_request_failed", http.StatusInternalServerError)
 	}
 
 	// 9. 发送请求

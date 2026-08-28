@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -62,6 +63,100 @@ func TestConvertRequestPreservesSeedanceMediaAndOptionalValues(t *testing.T) {
 	assert.Equal(t, []string{"first_image", "last_image", "reference_video", "reference_audio"}, []string{
 		payload.Media[0].Type, payload.Media[1].Type, payload.Media[2].Type, payload.Media[3].Type,
 	})
+}
+
+func TestBuildRequestBodyStabilizesRemoteMediaWithoutChangingOrderOrRoles(t *testing.T) {
+	originalPersist := persistTaskInputRemoteMedia
+	defer func() { persistTaskInputRemoteMedia = originalPersist }()
+	calls := make([]string, 0)
+	persistTaskInputRemoteMedia = func(_ context.Context, sourceURL, role string, _ time.Duration) (string, string, service.TaskInputRemoteAudit, error) {
+		calls = append(calls, role+"="+sourceURL)
+		token := fmt.Sprintf("%040d", len(calls))
+		return "inputs/" + token, "https://gateway.example/v1/video-inputs/" + token, service.TaskInputRemoteAudit{
+			Source: "https://media.example/input", SourceHash: "sha256:fixture", Role: role, Stage: "stabilized",
+			ContentType: map[string]string{"reference_image": "image/png", "first_image": "image/png", "last_image": "image/png", "reference_video": "video/mp4", "reference_audio": "audio/wav"}[role],
+			Bytes:       10, ExpiresAtUTC: "2026-08-29T00:00:00Z",
+		}, nil
+	}
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	ctx.Set("task_request", relaycommon.TaskSubmitReq{
+		Model: ModelSeedance20, Prompt: "preserve media", Resolution: "720P",
+		Content: []relaycommon.TaskContentItem{
+			{Type: "image_url", Role: "reference_image", ImageURL: &relaycommon.TaskMediaURL{URL: "https://one.example/a.png?sig=one"}},
+			{Type: "image_url", Role: "reference_image", ImageURL: &relaycommon.TaskMediaURL{URL: "https://two.example/b.png?sig=two"}},
+			{Type: "image_url", Role: "first_frame", ImageURL: &relaycommon.TaskMediaURL{URL: "https://three.example/start.png"}},
+			{Type: "image_url", Role: "last_frame", ImageURL: &relaycommon.TaskMediaURL{URL: "https://four.example/end.png"}},
+			{Type: "video_url", Role: "reference_video", VideoURL: &relaycommon.TaskMediaURL{URL: "https://five.example/ref.mp4"}},
+			{Type: "audio_url", Role: "reference_audio", AudioURL: &relaycommon.TaskMediaURL{URL: "https://six.example/ref.wav"}},
+		},
+	})
+	info := tokenPonyTestRelayInfo()
+	body, err := (&TaskAdaptor{httpTimeoutSecond: 3}).BuildRequestBody(ctx, info)
+	require.NoError(t, err)
+	var payload requestPayload
+	require.NoError(t, common.DecodeJson(body, &payload))
+	assert.Equal(t, []string{"reference_image", "reference_image", "first_image", "last_image", "reference_video", "reference_audio"}, []string{
+		payload.Media[0].Type, payload.Media[1].Type, payload.Media[2].Type, payload.Media[3].Type, payload.Media[4].Type, payload.Media[5].Type,
+	})
+	assert.Equal(t, []string{
+		"reference_image=https://one.example/a.png?sig=one", "reference_image=https://two.example/b.png?sig=two",
+		"first_image=https://three.example/start.png", "last_image=https://four.example/end.png",
+		"reference_video=https://five.example/ref.mp4", "reference_audio=https://six.example/ref.wav",
+	}, calls)
+	for i, media := range payload.Media {
+		assert.Equal(t, fmt.Sprintf("https://gateway.example/v1/video-inputs/%040d", i+1), media.URL)
+	}
+	require.Len(t, info.InputMediaFiles, 6)
+	assert.NotContains(t, info.InputMediaAudit, "sig=one")
+	assert.NotContains(t, info.InputMediaAudit, "sig=two")
+	task := model.InitTask("tokenpony", info)
+	assert.Equal(t, info.InputMediaAudit, task.Properties.Input)
+	assert.Equal(t, info.InputMediaFiles, task.PrivateData.InputMediaFiles)
+}
+
+func TestBuildRequestBodyRemoteFailureStopsCreateBeforeBilling(t *testing.T) {
+	originalPersist := persistTaskInputRemoteMedia
+	defer func() { persistTaskInputRemoteMedia = originalPersist }()
+	calls := 0
+	persistTaskInputRemoteMedia = func(_ context.Context, sourceURL, role string, _ time.Duration) (string, string, service.TaskInputRemoteAudit, error) {
+		calls++
+		audit := service.TaskInputRemoteAudit{Source: "https://media.example/" + role, SourceHash: "sha256:redacted", Role: role, Stage: "http_status"}
+		if calls == 2 {
+			return "", "", audit, &service.TaskInputRemoteError{Kind: "http_status", Stage: "http_status", HTTPStatus: http.StatusForbidden}
+		}
+		token := strings.Repeat("a", 40)
+		return "inputs/" + token, "https://gateway.example/v1/video-inputs/" + token, audit, nil
+	}
+	createCalls := 0
+	createServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		createCalls++
+		_, _ = w.Write([]byte(`{"code":200,"data":{"id":"must-not-exist"}}`))
+	}))
+	defer createServer.Close()
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	ctx.Set("task_request", relaycommon.TaskSubmitReq{Model: ModelSeedance20, Prompt: "fail before create", Content: []relaycommon.TaskContentItem{
+		{Type: "image_url", Role: "reference_image", ImageURL: &relaycommon.TaskMediaURL{URL: "https://one.example/a.png"}},
+		{Type: "image_url", Role: "reference_image", ImageURL: &relaycommon.TaskMediaURL{URL: "https://two.example/b.png"}},
+	}})
+	info := tokenPonyTestRelayInfo()
+	adaptor := &TaskAdaptor{baseURL: createServer.URL, httpTimeoutSecond: 2}
+	body, err := adaptor.BuildRequestBody(ctx, info)
+	if err == nil {
+		resp, requestErr := adaptor.DoRequest(ctx, info, body)
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		require.NoError(t, requestErr)
+	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "第 2 项（参考图/reference_image）下载失败（HTTP 403）")
+	assert.Equal(t, 0, createCalls)
+	assert.Nil(t, info.Billing, "remote media validation runs before billing")
+	assert.Empty(t, info.InputMediaFiles, "partial stable files must be rolled back")
 }
 
 func TestUnifiedFrameRetryJSONMapsFirstFrameToFirstImage(t *testing.T) {

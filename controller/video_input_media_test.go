@@ -44,6 +44,14 @@ func TestVideoInputMediaServesCapabilityURLWithoutAuthentication(t *testing.T) {
 	assert.Equal(t, "nosniff", recorder.Header().Get("X-Content-Type-Options"))
 	assert.Equal(t, []byte("\x89PNG\r\n\x1a\nfixture"), recorder.Body.Bytes())
 
+	rangeRequest := httptest.NewRequest(http.MethodGet, "/v1/video-inputs/"+filepath.Base(relative), nil)
+	rangeRequest.Header.Set("Range", "bytes=0-3")
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, rangeRequest)
+	assert.Equal(t, http.StatusPartialContent, recorder.Code)
+	assert.Equal(t, "bytes 0-3/15", recorder.Header().Get("Content-Range"))
+	assert.Equal(t, []byte("\x89PNG"), recorder.Body.Bytes())
+
 	recorder = httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/video-inputs/not-a-token", nil))
 	assert.Equal(t, http.StatusNotFound, recorder.Code)

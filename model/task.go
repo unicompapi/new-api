@@ -200,6 +200,7 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 	if relayInfo != nil && relayInfo.TaskRelayInfo != nil {
 		privateData.InputMediaFile = relayInfo.TaskRelayInfo.InputMediaFile
 		privateData.InputMediaFiles = append([]string(nil), relayInfo.TaskRelayInfo.InputMediaFiles...)
+		properties.Input = relayInfo.TaskRelayInfo.InputMediaAudit
 	}
 
 	// 使用预生成的公开 ID（如果有），否则新生成

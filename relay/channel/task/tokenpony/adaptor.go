@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
@@ -26,6 +27,8 @@ import (
 )
 
 var assetURLPattern = regexp.MustCompile(`^asset://[A-Za-z0-9_-]+$`)
+
+var persistTaskInputRemoteMedia = service.PersistTaskInputRemoteMedia
 
 type requestPayload struct {
 	Model           string                      `json:"model"`
@@ -181,12 +184,113 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	if err := a.ensureAssetsActive(c.Request.Context(), info, payload); err != nil {
 		return nil, err
 	}
+	rollbackRemoteMedia, err := materializeRemoteMedia(c.Request.Context(), payload, info, time.Duration(a.httpTimeoutSecond)*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if !keepInputMedia {
+			rollbackRemoteMedia()
+		}
+	}()
 	body, err := common.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
 	keepInputMedia = true
 	return bytes.NewReader(body), nil
+}
+
+type remoteMediaAudit struct {
+	Index int `json:"index"`
+	service.TaskInputRemoteAudit
+}
+
+func materializeRemoteMedia(ctx context.Context, payload *requestPayload, info *relaycommon.RelayInfo, timeout time.Duration) (func(), error) {
+	if len(payload.Media) == 0 {
+		return func() {}, nil
+	}
+	if info == nil || info.TaskRelayInfo == nil {
+		return func() {}, errors.New("task relay info is required for remote media inputs")
+	}
+	start := len(info.InputMediaFiles)
+	createdKeys := make([]string, 0)
+	rollback := func() {
+		for _, relative := range info.InputMediaFiles[start:] {
+			service.RemoveTaskInputMedia(relative)
+		}
+		info.InputMediaFiles = info.InputMediaFiles[:start]
+		for _, key := range createdKeys {
+			delete(info.InputMediaURLs, key)
+		}
+	}
+	stableURLs := map[string]struct{}{}
+	if info.InputMediaURL != "" {
+		stableURLs[info.InputMediaURL] = struct{}{}
+	}
+	for _, value := range info.InputMediaURLs {
+		stableURLs[value] = struct{}{}
+	}
+	audits := make([]remoteMediaAudit, 0, len(payload.Media))
+	for i := range payload.Media {
+		media := &payload.Media[i]
+		if strings.HasPrefix(media.URL, "asset://") {
+			continue
+		}
+		if _, ok := stableURLs[media.URL]; ok {
+			continue
+		}
+		key := fmt.Sprintf("remote:%x", sha256.Sum256([]byte(media.URL)))
+		if stable, ok := info.InputMediaURLs[key]; ok {
+			media.URL = stable
+			continue
+		}
+		relative, publicURL, audit, err := persistTaskInputRemoteMedia(ctx, media.URL, media.Type, timeout)
+		record := remoteMediaAudit{Index: i, TaskInputRemoteAudit: audit}
+		audits = append(audits, record)
+		if err != nil {
+			rollback()
+			safeAudit, _ := common.Marshal(record)
+			logger.LogWarn(ctx, fmt.Sprintf("TokenPony input media stabilization failed: %s error=%s", safeAudit, err.Error()))
+			return func() {}, fmt.Errorf("第 %d 项（%s/%s）%w", i+1, tokenPonyMediaLabel(media.Type), media.Type, err)
+		}
+		if info.InputMediaURLs == nil {
+			info.InputMediaURLs = make(map[string]string)
+		}
+		info.InputMediaURLs[key] = publicURL
+		createdKeys = append(createdKeys, key)
+		info.InputMediaFiles = append(info.InputMediaFiles, relative)
+		stableURLs[publicURL] = struct{}{}
+		media.URL = publicURL
+		safeAudit, _ := common.Marshal(record)
+		logger.LogInfo(ctx, fmt.Sprintf("TokenPony input media stabilized: %s", safeAudit))
+	}
+	if len(audits) > 0 {
+		safeAudit, err := common.Marshal(audits)
+		if err != nil {
+			rollback()
+			return func() {}, err
+		}
+		info.InputMediaAudit = string(safeAudit)
+	}
+	return rollback, nil
+}
+
+func tokenPonyMediaLabel(mediaType string) string {
+	switch mediaType {
+	case "reference_image":
+		return "参考图"
+	case "first_image":
+		return "首帧图"
+	case "last_image":
+		return "尾帧图"
+	case "reference_video":
+		return "参考视频"
+	case "reference_audio":
+		return "参考音频"
+	default:
+		return "媒体"
+	}
 }
 
 func (a *TaskAdaptor) ensureAssetsActive(ctx context.Context, info *relaycommon.RelayInfo, payload *requestPayload) error {
