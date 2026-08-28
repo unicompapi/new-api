@@ -80,11 +80,10 @@ func downloadTaskMedia(ctx context.Context, channel *model.Channel, sourceURL, t
 		return err
 	}
 	clientCopy := *client
-	timeout := channel.GetOtherSettings().TokenPonyHTTPTimeoutSeconds
-	if timeout <= 0 {
-		timeout = 30
+	timeout := channel.GetOtherSettings().TokenPonyMediaDownloadTimeoutSeconds
+	if timeout > 0 {
+		clientCopy.Timeout = time.Duration(timeout) * time.Second
 	}
-	clientCopy.Timeout = time.Duration(timeout) * time.Second
 	resp, err := clientCopy.Do(req)
 	if err != nil {
 		return err

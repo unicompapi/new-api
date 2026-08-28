@@ -103,7 +103,7 @@ func persistTaskInputMedia(source io.Reader, declaredMediaType, mediaRole, label
 	written, copyErr := io.Copy(temp, io.LimitReader(source, maxTaskInputMediaBytes+1))
 	if copyErr != nil {
 		_ = temp.Close()
-		return "", "", "", 0, newTaskInputPersistError("interrupted", fmt.Errorf("%s download interrupted: %w", label, copyErr))
+		return "", "", "", written, newTaskInputPersistError("interrupted", fmt.Errorf("%s download interrupted: %w", label, copyErr))
 	}
 	if written == 0 {
 		_ = temp.Close()

@@ -88,9 +88,10 @@ type queryData struct {
 
 type TaskAdaptor struct {
 	taskcommon.BaseBilling
-	apiKey            string
-	baseURL           string
-	httpTimeoutSecond int
+	apiKey                     string
+	baseURL                    string
+	httpTimeoutSecond          int
+	mediaDownloadTimeoutSecond int
 }
 
 func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
@@ -98,6 +99,7 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 	a.baseURL = strings.TrimRight(info.ChannelBaseUrl, "/")
 	if info.ChannelMeta != nil {
 		a.httpTimeoutSecond = info.ChannelMeta.ChannelOtherSettings.TokenPonyHTTPTimeoutSeconds
+		a.mediaDownloadTimeoutSecond = info.ChannelMeta.ChannelOtherSettings.TokenPonyMediaDownloadTimeoutSeconds
 	}
 	if a.httpTimeoutSecond <= 0 {
 		a.httpTimeoutSecond = defaultHTTPTimeout
@@ -184,7 +186,7 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	if err := a.ensureAssetsActive(c.Request.Context(), info, payload); err != nil {
 		return nil, err
 	}
-	rollbackRemoteMedia, err := materializeRemoteMedia(c.Request.Context(), payload, info, time.Duration(a.httpTimeoutSecond)*time.Second)
+	rollbackRemoteMedia, err := materializeRemoteMedia(c.Request.Context(), payload, info, time.Duration(a.mediaDownloadTimeoutSecond)*time.Second)
 	if err != nil {
 		return nil, err
 	}

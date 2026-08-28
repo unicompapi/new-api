@@ -69,8 +69,10 @@ func TestBuildRequestBodyStabilizesRemoteMediaWithoutChangingOrderOrRoles(t *tes
 	originalPersist := persistTaskInputRemoteMedia
 	defer func() { persistTaskInputRemoteMedia = originalPersist }()
 	calls := make([]string, 0)
-	persistTaskInputRemoteMedia = func(_ context.Context, sourceURL, role string, _ time.Duration) (string, string, service.TaskInputRemoteAudit, error) {
+	var downloadTimeout time.Duration
+	persistTaskInputRemoteMedia = func(_ context.Context, sourceURL, role string, timeout time.Duration) (string, string, service.TaskInputRemoteAudit, error) {
 		calls = append(calls, role+"="+sourceURL)
+		downloadTimeout = timeout
 		token := fmt.Sprintf("%040d", len(calls))
 		return "inputs/" + token, "https://gateway.example/v1/video-inputs/" + token, service.TaskInputRemoteAudit{
 			Source: "https://media.example/input", SourceHash: "sha256:fixture", Role: role, Stage: "stabilized",
@@ -93,7 +95,7 @@ func TestBuildRequestBodyStabilizesRemoteMediaWithoutChangingOrderOrRoles(t *tes
 		},
 	})
 	info := tokenPonyTestRelayInfo()
-	body, err := (&TaskAdaptor{httpTimeoutSecond: 3}).BuildRequestBody(ctx, info)
+	body, err := (&TaskAdaptor{httpTimeoutSecond: 3, mediaDownloadTimeoutSecond: 120}).BuildRequestBody(ctx, info)
 	require.NoError(t, err)
 	var payload requestPayload
 	require.NoError(t, common.DecodeJson(body, &payload))
@@ -109,11 +111,26 @@ func TestBuildRequestBodyStabilizesRemoteMediaWithoutChangingOrderOrRoles(t *tes
 		assert.Equal(t, fmt.Sprintf("https://gateway.example/v1/video-inputs/%040d", i+1), media.URL)
 	}
 	require.Len(t, info.InputMediaFiles, 6)
+	assert.Equal(t, 120*time.Second, downloadTimeout)
 	assert.NotContains(t, info.InputMediaAudit, "sig=one")
 	assert.NotContains(t, info.InputMediaAudit, "sig=two")
 	task := model.InitTask("tokenpony", info)
 	assert.Equal(t, info.InputMediaAudit, task.Properties.Input)
 	assert.Equal(t, info.InputMediaFiles, task.PrivateData.InputMediaFiles)
+}
+
+func TestInitKeepsAPITimeoutIndependentFromMediaDownloadTimeout(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	adaptor.Init(&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}})
+	assert.Equal(t, defaultHTTPTimeout, adaptor.httpTimeoutSecond)
+	assert.Zero(t, adaptor.mediaDownloadTimeoutSecond)
+
+	adaptor.Init(&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{
+		TokenPonyHTTPTimeoutSeconds:          17,
+		TokenPonyMediaDownloadTimeoutSeconds: 120,
+	}}})
+	assert.Equal(t, 17, adaptor.httpTimeoutSecond)
+	assert.Equal(t, 120, adaptor.mediaDownloadTimeoutSecond)
 }
 
 func TestBuildRequestBodyRemoteFailureStopsCreateBeforeBilling(t *testing.T) {

@@ -188,6 +188,12 @@ export const channelFormSchema = z
     aws_key_type: z.enum(['ak_sk', 'api_key']).optional(), // AWS specific
     azure_responses_version: z.string().optional(), // Azure specific
     tokenpony_http_timeout_seconds: z.number().int().min(1).max(600).optional(),
+    tokenpony_media_download_timeout_seconds: z
+      .number()
+      .int()
+      .min(1)
+      .max(600)
+      .optional(),
     tokenpony_poll_interval_seconds: z
       .number()
       .int()
@@ -313,6 +319,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   aws_key_type: 'ak_sk',
   azure_responses_version: '',
   tokenpony_http_timeout_seconds: 30,
+  tokenpony_media_download_timeout_seconds: undefined,
   tokenpony_poll_interval_seconds: 15,
   // Field passthrough controls
   allow_service_tier: false,
@@ -380,6 +387,7 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
   let tokenPonyHTTPTimeoutSeconds = 30
+  let tokenPonyMediaDownloadTimeoutSeconds: number | undefined
   let tokenPonyPollIntervalSeconds = 15
 
   if (channel.settings) {
@@ -407,6 +415,8 @@ export function transformChannelToFormDefaults(
         : ''
       tokenPonyHTTPTimeoutSeconds =
         Number(parsed.tokenpony_http_timeout_seconds) || 30
+      tokenPonyMediaDownloadTimeoutSeconds =
+        Number(parsed.tokenpony_media_download_timeout_seconds) || undefined
       tokenPonyPollIntervalSeconds =
         Number(parsed.tokenpony_poll_interval_seconds) || 15
     } catch (error) {
@@ -459,6 +469,8 @@ export function transformChannelToFormDefaults(
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
     tokenpony_http_timeout_seconds: tokenPonyHTTPTimeoutSeconds,
+    tokenpony_media_download_timeout_seconds:
+      tokenPonyMediaDownloadTimeoutSeconds,
     tokenpony_poll_interval_seconds: tokenPonyPollIntervalSeconds,
   }
 }
@@ -525,10 +537,17 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
   if (formData.type === 58) {
     settingsObj.tokenpony_http_timeout_seconds =
       formData.tokenpony_http_timeout_seconds || 30
+    if (formData.tokenpony_media_download_timeout_seconds) {
+      settingsObj.tokenpony_media_download_timeout_seconds =
+        formData.tokenpony_media_download_timeout_seconds
+    } else {
+      delete settingsObj.tokenpony_media_download_timeout_seconds
+    }
     settingsObj.tokenpony_poll_interval_seconds =
       formData.tokenpony_poll_interval_seconds || 15
   } else {
     delete settingsObj.tokenpony_http_timeout_seconds
+    delete settingsObj.tokenpony_media_download_timeout_seconds
     delete settingsObj.tokenpony_poll_interval_seconds
   }
 

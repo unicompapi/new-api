@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -143,25 +145,114 @@ func TestPersistTaskInputRemoteMediaRejectsHTTPAndBodyFailures(t *testing.T) {
 	}
 }
 
-func TestPersistTaskInputRemoteMediaRejectsTimeoutAndRedirectLoop(t *testing.T) {
-	var base string
-	base = withTaskInputRemoteFixture(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/slow":
-			time.Sleep(80 * time.Millisecond)
-			_, _ = w.Write(pngBytes())
-		case "/loop":
-			http.Redirect(w, r, base+"/loop", http.StatusFound)
-		}
-	}))
-	_, _, _, err := PersistTaskInputRemoteMedia(context.Background(), base+"/slow", "reference_image", 10*time.Millisecond)
+func TestPersistTaskInputRemoteMediaRejectsTimeoutBeforeHeaders(t *testing.T) {
+	withTaskInputRemoteSettings(t)
+	taskInputLookupIPAddr = publicFixtureLookup
+	taskInputRemoteClient = func(time.Duration) *http.Client {
+		return &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, context.DeadlineExceeded
+		})}
+	}
+	_, _, audit, err := PersistTaskInputRemoteMedia(context.Background(), "https://media.example/slow", "reference_image", 30*time.Second)
 	var remoteErr *TaskInputRemoteError
 	require.ErrorAs(t, err, &remoteErr)
 	assert.Equal(t, "timeout", remoteErr.Kind)
+	assert.Equal(t, "media_timeout", audit.ErrorCode)
+}
 
-	_, _, _, err = PersistTaskInputRemoteMedia(context.Background(), base+"/loop", "reference_image", time.Second)
+func TestPersistTaskInputRemoteMediaRejectsRedirectLoop(t *testing.T) {
+	var base string
+	base = withTaskInputRemoteFixture(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/loop" {
+			http.Redirect(w, r, base+"/loop", http.StatusFound)
+		}
+	}))
+	_, _, _, err := PersistTaskInputRemoteMedia(context.Background(), base+"/loop", "reference_image", time.Second)
+	var remoteErr *TaskInputRemoteError
 	require.ErrorAs(t, err, &remoteErr)
 	assert.Equal(t, "redirect", remoteErr.Kind)
+}
+
+func TestPersistTaskInputRemoteMediaClassifiesBodyTransferFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, code string
+		err              error
+	}{
+		{"context deadline", "timeout", "media_timeout", context.DeadlineExceeded},
+		{"network timeout", "timeout", "media_timeout", fixtureTimeoutError{}},
+		{"connection interrupted", "interrupted", "media_interrupted", io.ErrUnexpectedEOF},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withTaskInputRemoteSettings(t)
+			taskInputLookupIPAddr = publicFixtureLookup
+			prefix := pngBytes()[:8]
+			taskInputRemoteClient = func(time.Duration) *http.Client {
+				return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode:    http.StatusOK,
+						Header:        http.Header{"Content-Type": []string{"image/png"}},
+						Body:          io.NopCloser(&errorAfterReader{data: prefix, err: tc.err}),
+						ContentLength: 1000,
+						Request:       req,
+					}, nil
+				})}
+			}
+
+			_, _, audit, err := PersistTaskInputRemoteMedia(context.Background(), "https://media.example/input.png?signature=secret", "reference_image", 30*time.Second)
+			var remoteErr *TaskInputRemoteError
+			require.ErrorAs(t, err, &remoteErr)
+			assert.Equal(t, tc.kind, remoteErr.Kind)
+			assert.Equal(t, tc.code, audit.ErrorCode)
+			assert.Equal(t, int64(len(prefix)), audit.Bytes)
+			require.NotNil(t, audit.ContentLength)
+			assert.Equal(t, int64(1000), *audit.ContentLength)
+			assert.Equal(t, "image/png", audit.ContentType)
+			assert.Contains(t, err.Error(), "8/1000")
+			entries, readErr := os.ReadDir(filepath.Join(constant.TaskMediaDir, "inputs"))
+			require.NoError(t, readErr)
+			assert.Empty(t, entries)
+		})
+	}
+}
+
+func TestPersistTaskInputRemoteMediaHandlesUnknownLengthAndLargeSuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		contentLength int64
+		data          []byte
+	}{
+		{"unknown length", -1, pngBytes()},
+		{"large body", 14 << 20, append(append([]byte{}, pngBytes()...), make([]byte, (14<<20)-len(pngBytes()))...)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withTaskInputRemoteSettings(t)
+			taskInputLookupIPAddr = publicFixtureLookup
+			taskInputRemoteClient = func(time.Duration) *http.Client {
+				return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode:    http.StatusOK,
+						Header:        http.Header{"Content-Type": []string{"image/png"}},
+						Body:          io.NopCloser(bytes.NewReader(tc.data)),
+						ContentLength: tc.contentLength,
+						Request:       req,
+					}, nil
+				})}
+			}
+
+			relative, _, audit, err := PersistTaskInputRemoteMedia(context.Background(), "https://media.example/input.png", "reference_image", 0)
+			require.NoError(t, err)
+			t.Cleanup(func() { RemoveTaskInputMedia(relative) })
+			assert.Equal(t, int64(len(tc.data)), audit.Bytes)
+			assert.Equal(t, "image/png", audit.ContentType)
+			assert.Equal(t, "image/png", audit.DetectedType)
+			if tc.contentLength < 0 {
+				assert.Nil(t, audit.ContentLength)
+			} else {
+				require.NotNil(t, audit.ContentLength)
+				assert.Equal(t, tc.contentLength, *audit.ContentLength)
+			}
+		})
+	}
 }
 
 func TestPersistTaskInputRemoteMediaBlocksSSRFAndDNSRebinding(t *testing.T) {
@@ -253,13 +344,43 @@ func withTaskInputRemoteFixture(t *testing.T, handler http.Handler) string {
 func withTaskInputRemoteSettings(t *testing.T) {
 	t.Helper()
 	oldDir, oldAddress := constant.TaskMediaDir, system_setting.ServerAddress
-	oldLookup, oldDial, oldTLS := taskInputLookupIPAddr, taskInputDialContext, taskInputTLSConfig
+	oldLookup, oldDial, oldTLS, oldClient := taskInputLookupIPAddr, taskInputDialContext, taskInputTLSConfig, taskInputRemoteClient
 	constant.TaskMediaDir = t.TempDir()
 	system_setting.ServerAddress = "https://gateway.example"
 	t.Cleanup(func() {
 		constant.TaskMediaDir, system_setting.ServerAddress = oldDir, oldAddress
-		taskInputLookupIPAddr, taskInputDialContext, taskInputTLSConfig = oldLookup, oldDial, oldTLS
+		taskInputLookupIPAddr, taskInputDialContext, taskInputTLSConfig, taskInputRemoteClient = oldLookup, oldDial, oldTLS, oldClient
 	})
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+type errorAfterReader struct {
+	data []byte
+	err  error
+}
+
+func (r *errorAfterReader) Read(p []byte) (int, error) {
+	if len(r.data) > 0 {
+		n := copy(p, r.data)
+		r.data = r.data[n:]
+		return n, nil
+	}
+	return 0, r.err
+}
+
+type fixtureTimeoutError struct{}
+
+func (fixtureTimeoutError) Error() string   { return "fixture timeout" }
+func (fixtureTimeoutError) Timeout() bool   { return true }
+func (fixtureTimeoutError) Temporary() bool { return true }
+
+var _ net.Error = fixtureTimeoutError{}
+
+func publicFixtureLookup(context.Context, string) ([]net.IPAddr, error) {
+	return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
 }
 
 func jpegFixture() []byte {

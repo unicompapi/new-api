@@ -18,22 +18,27 @@ import (
 )
 
 type TaskInputRemoteAudit struct {
-	Source       string `json:"source"`
-	SourceHash   string `json:"source_hash"`
-	FinalSource  string `json:"final_source,omitempty"`
-	FinalHash    string `json:"final_hash,omitempty"`
-	Role         string `json:"role"`
-	Stage        string `json:"stage"`
-	ContentType  string `json:"content_type,omitempty"`
-	Bytes        int64  `json:"bytes,omitempty"`
-	ExpiresAtUTC string `json:"expires_at_utc,omitempty"`
+	Source        string `json:"source"`
+	SourceHash    string `json:"source_hash"`
+	FinalSource   string `json:"final_source,omitempty"`
+	FinalHash     string `json:"final_hash,omitempty"`
+	Role          string `json:"role"`
+	Stage         string `json:"stage"`
+	ErrorCode     string `json:"error_code,omitempty"`
+	ContentType   string `json:"content_type,omitempty"`
+	DetectedType  string `json:"detected_type,omitempty"`
+	ContentLength *int64 `json:"content_length,omitempty"`
+	Bytes         int64  `json:"bytes"`
+	ExpiresAtUTC  string `json:"expires_at_utc,omitempty"`
 }
 
 type TaskInputRemoteError struct {
-	Kind       string
-	Stage      string
-	HTTPStatus int
-	Detected   string
+	Kind          string
+	Stage         string
+	HTTPStatus    int
+	Detected      string
+	Bytes         int64
+	ContentLength *int64
 }
 
 func (e *TaskInputRemoteError) Error() string {
@@ -45,9 +50,9 @@ func (e *TaskInputRemoteError) Error() string {
 	case "http_status":
 		return fmt.Sprintf("下载失败（HTTP %d）", e.HTTPStatus)
 	case "timeout":
-		return "下载超时"
+		return formatTaskInputTransferError("下载超时", e.Bytes, e.ContentLength)
 	case "interrupted":
-		return "下载中断"
+		return formatTaskInputTransferError("下载中断", e.Bytes, e.ContentLength)
 	case "empty":
 		return "文件为空"
 	case "too_large":
@@ -66,19 +71,22 @@ var (
 	taskInputLookupIPAddr = net.DefaultResolver.LookupIPAddr
 	taskInputDialContext  = (&net.Dialer{}).DialContext
 	taskInputTLSConfig    *tls.Config
+	taskInputRemoteClient = newTaskInputRemoteClient
 )
 
 func PersistTaskInputRemoteMedia(ctx context.Context, sourceURL, mediaRole string, timeout time.Duration) (string, string, TaskInputRemoteAudit, error) {
 	audit := newTaskInputRemoteAudit(sourceURL, mediaRole)
 	if _, err := validateTaskInputRemoteURL(ctx, sourceURL); err != nil {
 		audit.Stage = "validate_url"
+		audit.ErrorCode = taskInputRemoteErrorCode("unsafe_url")
 		return "", "", audit, &TaskInputRemoteError{Kind: "unsafe_url", Stage: audit.Stage}
 	}
 
-	client := newTaskInputRemoteClient(timeout)
+	client := taskInputRemoteClient(timeout)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
 		audit.Stage = "build_request"
+		audit.ErrorCode = taskInputRemoteErrorCode("unsafe_url")
 		return "", "", audit, &TaskInputRemoteError{Kind: "unsafe_url", Stage: audit.Stage}
 	}
 	resp, err := client.Do(req)
@@ -94,18 +102,25 @@ func PersistTaskInputRemoteMedia(ctx context.Context, sourceURL, mediaRole strin
 			kind = "unsafe_url"
 		}
 		audit.Stage = kind
+		audit.ErrorCode = taskInputRemoteErrorCode(kind)
 		return "", "", audit, &TaskInputRemoteError{Kind: kind, Stage: audit.Stage}
 	}
 	defer resp.Body.Close()
 
 	audit.FinalSource = safeTaskInputSource(resp.Request.URL.String())
 	audit.FinalHash = taskInputSourceHash(resp.Request.URL.String())
+	if resp.ContentLength >= 0 {
+		contentLength := resp.ContentLength
+		audit.ContentLength = &contentLength
+	}
 	if resp.StatusCode != http.StatusOK {
 		audit.Stage = "http_status"
+		audit.ErrorCode = taskInputRemoteErrorCode("http_status")
 		return "", "", audit, &TaskInputRemoteError{Kind: "http_status", Stage: audit.Stage, HTTPStatus: resp.StatusCode}
 	}
 	if resp.ContentLength > maxTaskInputMediaBytes {
 		audit.Stage = "size"
+		audit.ErrorCode = taskInputRemoteErrorCode("too_large")
 		return "", "", audit, &TaskInputRemoteError{Kind: "too_large", Stage: audit.Stage}
 	}
 
@@ -114,28 +129,50 @@ func PersistTaskInputRemoteMedia(ctx context.Context, sourceURL, mediaRole strin
 		declaredType, _, err = mime.ParseMediaType(value)
 		if err != nil {
 			audit.Stage = "mime"
+			audit.ErrorCode = taskInputRemoteErrorCode("mime")
 			return "", "", audit, &TaskInputRemoteError{Kind: "mime", Stage: audit.Stage}
 		}
 		declaredType = strings.ToLower(declaredType)
 		if declaredType == "binary/octet-stream" {
 			declaredType = "application/octet-stream"
 		}
+		audit.ContentType = declaredType
 	}
 	relative, publicURL, detected, written, err := persistTaskInputMedia(resp.Body, declaredType, mediaRole, "remote media")
+	audit.Bytes = written
+	audit.DetectedType = detected
 	if err != nil {
 		kind := "persist"
 		var persistErr *taskInputPersistError
 		if errors.As(err, &persistErr) {
 			kind = persistErr.kind
 		}
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) || isTaskInputTimeout(err) {
+			kind = "timeout"
+		}
 		audit.Stage = kind
-		return "", "", audit, &TaskInputRemoteError{Kind: kind, Stage: audit.Stage, Detected: detected}
+		audit.ErrorCode = taskInputRemoteErrorCode(kind)
+		return "", "", audit, &TaskInputRemoteError{Kind: kind, Stage: audit.Stage, Detected: detected, Bytes: written, ContentLength: audit.ContentLength}
 	}
 	audit.Stage = "stabilized"
-	audit.ContentType = detected
+	audit.DetectedType = detected
 	audit.Bytes = written
 	audit.ExpiresAtUTC = time.Now().Add(taskInputMediaTTL).UTC().Format(time.RFC3339)
 	return relative, publicURL, audit, nil
+}
+
+func formatTaskInputTransferError(label string, bytes int64, contentLength *int64) string {
+	if bytes <= 0 {
+		return label
+	}
+	if contentLength != nil {
+		return fmt.Sprintf("%s（已读取 %d/%d 字节）", label, bytes, *contentLength)
+	}
+	return fmt.Sprintf("%s（已读取 %d 字节）", label, bytes)
+}
+
+func taskInputRemoteErrorCode(kind string) string {
+	return "media_" + kind
 }
 
 func newTaskInputRemoteClient(timeout time.Duration) *http.Client {

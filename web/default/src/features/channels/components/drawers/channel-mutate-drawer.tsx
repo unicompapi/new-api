@@ -2963,6 +2963,38 @@ export function ChannelMutateDrawer({
                               </FormItem>
                             )}
                           />
+                          <FormField
+                            control={form.control}
+                            name='tokenpony_media_download_timeout_seconds'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Media download timeout (seconds)')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={1}
+                                    max={600}
+                                    value={field.value ?? ''}
+                                    onChange={(event) =>
+                                      field.onChange(
+                                        event.target.value === ''
+                                          ? undefined
+                                          : Number(event.target.value)
+                                      )
+                                    }
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    'Timeout for TokenPony input and result media downloads; blank uses the request or system context'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
                         </div>
                       )}
                       {(currentType === 1 || currentType === 14) && (
