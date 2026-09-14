@@ -121,6 +121,31 @@ export function useUsersColumns(): ColumnDef<User>[] {
       meta: { label: t('Username'), mobileTitle: true },
     },
     {
+      accessorKey: 'phone',
+      header: ({ column }) => (
+        <DataTableColumnHeader
+          column={column}
+          title={t('Mobile phone number')}
+        />
+      ),
+      cell: ({ row }) => {
+        const phone = row.getValue('phone') as string | null | undefined
+        return phone ? (
+          <LongText className='max-w-[150px] font-mono text-sm'>
+            {phone}
+          </LongText>
+        ) : (
+          <span className='text-muted-foreground'>-</span>
+        )
+      },
+      filterFn: (row, id, value) => {
+        const state = row.getValue(id) ? 'true' : 'false'
+        return value.includes(state)
+      },
+      enableSorting: false,
+      meta: { label: t('Mobile phone number') },
+    },
+    {
       accessorKey: 'status',
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title={t('Status')} />
@@ -232,9 +257,7 @@ export function useUsersColumns(): ColumnDef<User>[] {
         return <GroupBadge group={group} />
       },
       filterFn: (row, id, value) => {
-        const group = String(row.getValue(id) || t('User Group')).toLowerCase()
-        const searchValue = String(value).toLowerCase()
-        return group.includes(searchValue)
+        return value.includes(String(row.getValue(id)))
       },
       meta: { label: t('Group') },
     },

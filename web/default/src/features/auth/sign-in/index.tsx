@@ -19,14 +19,23 @@ For commercial licensing, please contact support@quantumnous.com
 import { Link, useSearch } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useStatus } from '@/hooks/use-status'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AuthLayout } from '../auth-layout'
 import { TermsFooter } from '../components/terms-footer'
+import { SMSAuthForm } from './components/sms-auth-form'
 import { UserAuthForm } from './components/user-auth-form'
 
 export function SignIn() {
   const { t } = useTranslation()
   const { redirect } = useSearch({ from: '/(auth)/sign-in' })
   const { status } = useStatus()
+  const smsLoginEnabled = Boolean(
+    status?.sms_login_enabled ?? status?.data?.sms_login_enabled
+  )
+  const passwordLoginEnabled =
+    (status?.password_login_enabled ??
+      status?.data?.password_login_enabled ??
+      true) !== false
 
   return (
     <AuthLayout>
@@ -50,7 +59,22 @@ export function SignIn() {
             )}
         </div>
 
-        <UserAuthForm redirectTo={redirect} />
+        {smsLoginEnabled ? (
+          <Tabs defaultValue={passwordLoginEnabled ? 'password' : 'sms'}>
+            <TabsList className='grid w-full grid-cols-2'>
+              <TabsTrigger value='password'>{t('Password Login')}</TabsTrigger>
+              <TabsTrigger value='sms'>{t('SMS code login')}</TabsTrigger>
+            </TabsList>
+            <TabsContent value='password' className='mt-4'>
+              <UserAuthForm redirectTo={redirect} />
+            </TabsContent>
+            <TabsContent value='sms' className='mt-4'>
+              <SMSAuthForm redirectTo={redirect} />
+            </TabsContent>
+          </Tabs>
+        ) : (
+          <UserAuthForm redirectTo={redirect} />
+        )}
 
         <TermsFooter
           variant='sign-in'

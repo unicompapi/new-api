@@ -30,12 +30,14 @@ type User struct {
 	Role             int            `json:"role" gorm:"type:int;default:1"`   // admin, common
 	Status           int            `json:"status" gorm:"type:int;default:1"` // enabled, disabled
 	Email            string         `json:"email" gorm:"index" validate:"max=50"`
+	Phone            *string        `json:"phone,omitempty" gorm:"type:varchar(32);uniqueIndex"`
 	GitHubId         string         `json:"github_id" gorm:"column:github_id;index"`
 	DiscordId        string         `json:"discord_id" gorm:"column:discord_id;index"`
 	OidcId           string         `json:"oidc_id" gorm:"column:oidc_id;index"`
 	WeChatId         string         `json:"wechat_id" gorm:"column:wechat_id;index"`
 	TelegramId       string         `json:"telegram_id" gorm:"column:telegram_id;index"`
 	VerificationCode string         `json:"verification_code" gorm:"-:all"`                         // this field is only for Email verification, don't save it to database!
+	SMSCode          string         `json:"sms_code" gorm:"-:all"`                                  // this field is only for SMS verification, don't save it to database!
 	AccessToken      *string        `json:"-" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
 	Quota            int            `json:"quota" gorm:"type:int;default:0"`
 	UsedQuota        int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
@@ -185,6 +187,18 @@ func CheckUserExistOrDeleted(username string, email string) (bool, error) {
 	return true, nil
 }
 
+func CheckPhoneExistOrDeleted(phone string) (bool, error) {
+	var user User
+	err := DB.Unscoped().Where("phone = ?", phone).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func GetMaxUserId() int {
 	var user User
 	DB.Unscoped().Last(&user)
@@ -204,14 +218,14 @@ func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err err
 	}()
 
 	// Get total count within transaction
-	err = tx.Unscoped().Model(&User{}).Count(&total).Error
+	err = tx.Model(&User{}).Count(&total).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
 
 	// Get paginated users within same transaction
-	err = tx.Unscoped().Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit("password").Find(&users).Error
+	err = tx.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit("password").Find(&users).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
@@ -225,7 +239,7 @@ func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err err
 	return users, total, nil
 }
 
-func SearchUsers(keyword string, group string, role *int, status *int, startIdx int, num int) ([]*User, int64, error) {
+func SearchUsers(keyword string, group string, role *int, status *int, phoneBound *bool, startIdx int, num int) ([]*User, int64, error) {
 	var users []*User
 	var total int64
 	var err error
@@ -242,21 +256,23 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 	}()
 
 	// 构建基础查询
-	query := tx.Unscoped().Model(&User{})
+	query := tx.Model(&User{})
 
 	// 构建搜索条件
-	likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ?"
-	likeArgs := []interface{}{"%" + keyword + "%", "%" + keyword + "%", "%" + keyword + "%"}
+	if keyword != "" {
+		likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ? OR phone LIKE ?"
+		likeArgs := []interface{}{"%" + keyword + "%", "%" + keyword + "%", "%" + keyword + "%", "%" + keyword + "%"}
 
-	// 尝试将关键字转换为整数ID
-	keywordInt, err := strconv.Atoi(keyword)
-	if err == nil {
-		// 如果是数字，同时搜索ID和其他字段
-		likeCondition = "id = ? OR " + likeCondition
-		likeArgs = append([]interface{}{keywordInt}, likeArgs...)
+		// 尝试将关键字转换为整数ID
+		keywordInt, parseErr := strconv.Atoi(keyword)
+		if parseErr == nil {
+			// 如果是数字，同时搜索ID和其他字段
+			likeCondition = "id = ? OR " + likeCondition
+			likeArgs = append([]interface{}{keywordInt}, likeArgs...)
+		}
+
+		query = query.Where("("+likeCondition+")", likeArgs...)
 	}
-
-	query = query.Where("("+likeCondition+")", likeArgs...)
 	if group != "" {
 		query = query.Where(commonGroupCol+" = ?", group)
 	}
@@ -265,6 +281,13 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 	}
 	if status != nil {
 		query = query.Where("status = ?", *status)
+	}
+	if phoneBound != nil {
+		if *phoneBound {
+			query = query.Where("phone IS NOT NULL AND phone <> ?", "")
+		} else {
+			query = query.Where("phone IS NULL OR phone = ?", "")
+		}
 	}
 
 	// 获取总数
@@ -628,6 +651,21 @@ func (user *User) FillUserByEmail() error {
 	}
 	DB.Where(User{Email: user.Email}).First(user)
 	return nil
+}
+
+func GetEnabledUserByPhone(phone string) (*User, error) {
+	var user User
+	err := DB.Where("phone = ?", phone).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrInvalidCredentials
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrDatabase, err)
+	}
+	if user.Status != common.UserStatusEnabled {
+		return nil, ErrInvalidCredentials
+	}
+	return &user, nil
 }
 
 func (user *User) FillUserByGitHubId() error {

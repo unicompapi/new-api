@@ -220,7 +220,7 @@ func LinuxdoOAuth(c *gin.Context) {
 			return
 		}
 	} else {
-		if common.RegisterEnabled {
+		if common.RegisterEnabled && !common.SMSRegistrationRequired {
 			if linuxdoUser.TrustLevel >= common.LinuxDOMinimumTrustLevel {
 				user.Username = "linuxdo_" + strconv.Itoa(model.GetMaxUserId()+1)
 				user.DisplayName = linuxdoUser.Name

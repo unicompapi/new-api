@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import {
@@ -39,7 +39,7 @@ import {
   DISABLED_ROW_MOBILE,
   DataTablePage,
 } from '@/components/data-table'
-import { getUsers, searchUsers } from '../api'
+import { getGroups, getUsers, searchUsers } from '../api'
 import {
   USER_STATUS,
   getUserStatusOptions,
@@ -82,7 +82,8 @@ export function UsersTable() {
     columnFilters: [
       { columnId: 'status', searchKey: 'status', type: 'array' },
       { columnId: 'role', searchKey: 'role', type: 'array' },
-      { columnId: 'group', searchKey: 'group', type: 'string' },
+      { columnId: 'group', searchKey: 'group', type: 'array' },
+      { columnId: 'phone', searchKey: 'phoneBound', type: 'array' },
     ],
   })
   const statusFilter =
@@ -94,8 +95,30 @@ export function UsersTable() {
       | string[]
       | undefined) ?? []
   const groupFilter =
-    (columnFilters.find((filter) => filter.id === 'group')?.value as string) ??
-    ''
+    (columnFilters.find((filter) => filter.id === 'group')?.value as
+      | string[]
+      | undefined) ?? []
+  const phoneBoundFilter =
+    (columnFilters.find((filter) => filter.id === 'phone')?.value as
+      | string[]
+      | undefined) ?? []
+  const status = statusFilter[0] ?? ''
+  const role = roleFilter[0] ?? ''
+  const group = groupFilter[0] ?? ''
+  const phoneBound = phoneBoundFilter[0] ?? ''
+
+  const { data: groupsData } = useQuery({
+    queryKey: ['groups'],
+    queryFn: getGroups,
+  })
+  const groupOptions = useMemo(
+    () =>
+      (groupsData?.data ?? []).map((group) => ({
+        label: group,
+        value: group,
+      })),
+    [groupsData]
+  )
 
   // Fetch data with React Query
   const { data, isLoading, isFetching } = useQuery({
@@ -104,15 +127,15 @@ export function UsersTable() {
       pagination.pageIndex + 1,
       pagination.pageSize,
       globalFilter,
-      statusFilter,
-      roleFilter,
-      groupFilter,
+      status,
+      role,
+      group,
+      phoneBound,
       refreshTrigger,
     ],
     queryFn: async () => {
       const hasFilter = globalFilter?.trim()
-      const hasColumnFilter =
-        statusFilter.length > 0 || roleFilter.length > 0 || Boolean(groupFilter)
+      const hasColumnFilter = Boolean(status || role || group || phoneBound)
       const params = {
         p: pagination.pageIndex + 1,
         page_size: pagination.pageSize,
@@ -123,9 +146,10 @@ export function UsersTable() {
           ? await searchUsers({
               ...params,
               keyword: globalFilter,
-              status: statusFilter[0] ?? '',
-              role: roleFilter[0] ?? '',
-              group: groupFilter,
+              status,
+              role,
+              group,
+              phone_bound: phoneBound,
             })
           : await getUsers(params)
 
@@ -164,9 +188,11 @@ export function UsersTable() {
     globalFilterFn: (row, _columnId, filterValue) => {
       const searchValue = String(filterValue).toLowerCase()
       const fields = [
+        row.original.id,
         row.getValue('username'),
         row.original.display_name,
         row.original.email,
+        row.original.phone,
       ]
       return fields.some((field) =>
         String(field || '')
@@ -204,7 +230,7 @@ export function UsersTable() {
       )}
       skeletonKeyPrefix='users-skeleton'
       toolbarProps={{
-        searchPlaceholder: t('Filter by username, name or email...'),
+        searchPlaceholder: t('Filter by ID, username, name, phone or email...'),
         filters: [
           {
             columnId: 'status',
@@ -216,6 +242,21 @@ export function UsersTable() {
             columnId: 'role',
             title: t('Role'),
             options: getUserRoleOptions(t),
+            singleSelect: true,
+          },
+          {
+            columnId: 'group',
+            title: t('Group'),
+            options: groupOptions,
+            singleSelect: true,
+          },
+          {
+            columnId: 'phone',
+            title: t('Mobile phone number'),
+            options: [
+              { label: t('Bound'), value: 'true' },
+              { label: t('Not bound'), value: 'false' },
+            ],
             singleSelect: true,
           },
         ],

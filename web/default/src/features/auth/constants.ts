@@ -30,10 +30,18 @@ export const loginFormSchema = z.object({
     .min(8, 'Password must be at least 8 characters long'),
 })
 
+export const smsLoginFormSchema = z.object({
+  phone: z
+    .string()
+    .regex(/^1[3-9]\d{9}$/, 'Please enter a valid mobile phone number'),
+  code: z.string().regex(/^\d{6}$/, 'Verification code must be 6 digits'),
+})
+
 export const registerFormSchema = z
   .object({
     username: z.string().min(1, 'Please enter your username'),
     email: z.string().optional(),
+    phone: z.string().optional(),
     password: z
       .string()
       .min(1, 'Please enter your password')
@@ -66,12 +74,14 @@ export const OTP_LENGTH = 6
 export const BACKUP_CODE_LENGTH = 9 // XXXX-XXXX format
 export const BACKUP_CODE_REGEX = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/i
 export const OTP_REGEX = /^\d{6}$/
+export const MAINLAND_PHONE_REGEX = /^1[3-9]\d{9}$/
 
 // ============================================================================
 // Countdown Constants
 // ============================================================================
 
 export const EMAIL_VERIFICATION_COUNTDOWN = 30 // seconds
+export const SMS_VERIFICATION_COUNTDOWN = 60 // seconds
 export const PASSWORD_RESET_COUNTDOWN = 30 // seconds
 
 // ============================================================================

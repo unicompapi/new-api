@@ -23,10 +23,12 @@ import (
 )
 
 type TaskSubmitResult struct {
-	UpstreamTaskID string
-	TaskData       []byte
-	Platform       constant.TaskPlatform
-	Quota          int
+	UpstreamTaskID    string
+	TaskData          []byte
+	Platform          constant.TaskPlatform
+	Quota             int
+	SubmissionUnknown bool
+	UnknownReason     string
 	//PerCallPrice   types.PriceData
 }
 
@@ -202,6 +204,15 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		}
 	}
 
+	// TokenPony remote media must be stabilized before any billable state changes.
+	var requestBody io.Reader
+	if info.ChannelType == constant.ChannelTypeTokenPony {
+		requestBody, err = adaptor.BuildRequestBody(c, info)
+		if err != nil {
+			return nil, service.TaskErrorWrapperLocal(err, "invalid_tokenpony_request", http.StatusBadRequest)
+		}
+	}
+
 	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
 	if info.Billing == nil && !info.PriceData.FreeModel {
 		info.ForcePreConsume = true
@@ -211,19 +222,31 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 8. 构建请求体
-	requestBody, err := adaptor.BuildRequestBody(c, info)
-	if err != nil {
-		return nil, service.TaskErrorWrapper(err, "build_request_failed", http.StatusInternalServerError)
+	if requestBody == nil {
+		requestBody, err = adaptor.BuildRequestBody(c, info)
+		if err != nil {
+			return nil, service.TaskErrorWrapper(err, "build_request_failed", http.StatusInternalServerError)
+		}
 	}
 
 	// 9. 发送请求
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
+		if info.ChannelType == constant.ChannelTypeTokenPony {
+			return tokenPonyUnknownSubmission(c, info, platform, info.PriceData.Quota, "TokenPony submission result is unknown because the upstream request did not return a response"), nil
+		}
 		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError)
 	}
 	if resp != nil && resp.StatusCode != http.StatusOK {
 		responseBody, _ := io.ReadAll(resp.Body)
-		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
+		if info.ChannelType == constant.ChannelTypeTokenPony && resp.StatusCode >= http.StatusInternalServerError {
+			return tokenPonyUnknownSubmission(c, info, platform, info.PriceData.Quota, fmt.Sprintf("TokenPony submission result is unknown after upstream HTTP %d", resp.StatusCode)), nil
+		}
+		err := service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
+		if info.ChannelType == constant.ChannelTypeTokenPony {
+			err.LocalError = true
+		}
+		return nil, err
 	}
 
 	// 10. 返回 OtherRatios 给下游（header 必须在 DoResponse 写 body 之前设置）
@@ -261,6 +284,27 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		Platform:       platform,
 		Quota:          finalQuota,
 	}, nil
+}
+
+func tokenPonyUnknownSubmission(c *gin.Context, info *relaycommon.RelayInfo, platform constant.TaskPlatform, quota int, reason string) *TaskSubmitResult {
+	data, _ := common.Marshal(map[string]any{
+		"status": "SUBMISSION_UNKNOWN",
+		"reason": reason,
+	})
+	video := dto.NewOpenAIVideo()
+	video.ID = info.PublicTaskID
+	video.TaskID = info.PublicTaskID
+	video.Model = info.OriginModelName
+	video.Status = dto.VideoStatusUnknown
+	video.Error = &dto.OpenAIVideoError{Message: reason, Code: "submission_result_unknown"}
+	c.JSON(http.StatusBadGateway, video)
+	return &TaskSubmitResult{
+		TaskData:          data,
+		Platform:          platform,
+		Quota:             quota,
+		SubmissionUnknown: true,
+		UnknownReason:     reason,
+	}
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。

@@ -76,6 +76,7 @@ func sweepTimedOutTasks(ctx context.Context) {
 			logger.LogInfo(ctx, fmt.Sprintf("sweepTimedOutTasks: task %s already transitioned, skip", task.TaskID))
 			continue
 		}
+		RemoveTaskInputMediaFiles(task.PrivateData.InputMediaFile, task.PrivateData.InputMediaFiles)
 		timedOutCount++
 		if !isLegacy && task.Quota != 0 {
 			RefundTaskQuota(ctx, task, reason)
@@ -89,10 +90,15 @@ func sweepTimedOutTasks(ctx context.Context) {
 
 // TaskPollingLoop 主轮询循环，每 15 秒检查一次未完成的任务
 func TaskPollingLoop() {
+	nextInputCleanup := time.Time{}
 	for {
 		time.Sleep(time.Duration(15) * time.Second)
 		common.SysLog("任务进度轮询开始")
 		ctx := context.TODO()
+		if time.Now().After(nextInputCleanup) {
+			CleanupExpiredTaskInputMedia()
+			nextInputCleanup = time.Now().Add(time.Hour)
+		}
 		sweepTimedOutTasks(ctx)
 		allTasks := model.GetAllUnFinishSyncTasks(constant.TaskQueryLimit)
 		platformTask := make(map[constant.TaskPlatform][]*model.Task)
@@ -327,7 +333,8 @@ func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, chann
 	}
 	info := &relaycommon.RelayInfo{}
 	info.ChannelMeta = &relaycommon.ChannelMeta{
-		ChannelBaseUrl: cacheGetChannel.GetBaseURL(),
+		ChannelBaseUrl:       cacheGetChannel.GetBaseURL(),
+		ChannelOtherSettings: cacheGetChannel.GetOtherSettings(),
 	}
 	info.ApiKey = cacheGetChannel.Key
 	adaptor.Init(info)
@@ -353,6 +360,15 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		logger.LogError(ctx, fmt.Sprintf("Task %s not found in taskM", taskId))
 		return fmt.Errorf("task %s not found", taskId)
 	}
+	if ch.Type == constant.ChannelTypeTokenPony {
+		interval := ch.GetOtherSettings().TokenPonyPollIntervalSeconds
+		if interval <= 0 {
+			interval = 15
+		}
+		if task.PrivateData.LastPolledAt > 0 && time.Now().Unix()-task.PrivateData.LastPolledAt < int64(interval) {
+			return nil
+		}
+	}
 	key := ch.Key
 
 	privateData := task.PrivateData
@@ -376,6 +392,9 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	logger.LogDebug(ctx, "updateVideoSingleTask response: %s", responseBody)
 
 	snap := task.Snapshot()
+	if ch.Type == constant.ChannelTypeTokenPony {
+		task.PrivateData.LastPolledAt = time.Now().Unix()
+	}
 
 	taskResult := &relaycommon.TaskInfo{}
 	// try parse as New API response format
@@ -423,6 +442,14 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	shouldRefund := false
 	shouldSettle := false
 	quota := task.Quota
+	if taskResult.Status == model.TaskStatusSuccess && taskResult.PersistResult {
+		if err := PersistTaskResultMedia(ctx, ch, task, taskResult); err != nil {
+			taskResult.Status = model.TaskStatusFailure
+			taskResult.Progress = taskcommon.ProgressComplete
+			taskResult.Reason = "media persistence failed: " + err.Error()
+			task.PrivateData.MediaPersistError = err.Error()
+		}
+	}
 
 	task.Status = model.TaskStatus(taskResult.Status)
 	switch taskResult.Status {
@@ -440,7 +467,9 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		if task.FinishTime == 0 {
 			task.FinishTime = now
 		}
-		if strings.HasPrefix(taskResult.Url, "data:") {
+		if task.PrivateData.ResultFile != "" {
+			// PersistTaskResultMedia already stored stable proxy URLs.
+		} else if strings.HasPrefix(taskResult.Url, "data:") {
 			// data: URI (e.g. Vertex base64 encoded video) — keep in Data, not in ResultURL
 			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 		} else if taskResult.Url != "" {
@@ -482,6 +511,8 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 			logger.LogWarn(ctx, fmt.Sprintf("Task %s already transitioned by another process, skip billing", task.TaskID))
 			shouldRefund = false
 			shouldSettle = false
+		} else {
+			RemoveTaskInputMediaFiles(task.PrivateData.InputMediaFile, task.PrivateData.InputMediaFiles)
 		}
 	} else if !snap.Equal(task.Snapshot()) {
 		if _, err := task.UpdateWithStatus(snap.Status); err != nil {

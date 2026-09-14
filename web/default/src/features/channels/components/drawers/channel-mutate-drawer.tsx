@@ -613,6 +613,18 @@ export function ChannelMutateDrawer({
       }
     }
 
+    if (currentType === 58) {
+      if (!form.getValues('base_url')) {
+        form.setValue('base_url', 'https://api.tokenpony.cn')
+      }
+      if (!form.getValues('models')) {
+        form.setValue(
+          'models',
+          'doubao-seedance-2-0-260128,doubao-seedance-2-5-260628'
+        )
+      }
+    }
+
     // Type 18 (Xunfei) - set default other (version)
     if (currentType === 18) {
       const currentOther = form.getValues('other')
@@ -2893,6 +2905,98 @@ export function ChannelMutateDrawer({
                         title={t('Channel Extra Settings')}
                         icon={<Settings className='h-4 w-4' />}
                       />
+                      {currentType === 58 && (
+                        <div className='grid gap-4 border-y py-4 sm:grid-cols-2'>
+                          <FormField
+                            control={form.control}
+                            name='tokenpony_http_timeout_seconds'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('HTTP timeout (seconds)')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={1}
+                                    max={600}
+                                    value={field.value ?? 30}
+                                    onChange={(event) =>
+                                      field.onChange(Number(event.target.value))
+                                    }
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    'Timeout for TokenPony create and query requests'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name='tokenpony_poll_interval_seconds'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Poll interval (seconds)')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={1}
+                                    max={300}
+                                    value={field.value ?? 15}
+                                    onChange={(event) =>
+                                      field.onChange(Number(event.target.value))
+                                    }
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    'Minimum interval between TokenPony task queries'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name='tokenpony_media_download_timeout_seconds'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Media download timeout (seconds)')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={1}
+                                    max={600}
+                                    value={field.value ?? ''}
+                                    onChange={(event) =>
+                                      field.onChange(
+                                        event.target.value === ''
+                                          ? undefined
+                                          : Number(event.target.value)
+                                      )
+                                    }
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    'Timeout for TokenPony input and result media downloads; blank uses the request or system context'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                      )}
                       {(currentType === 1 || currentType === 14) && (
                         <div className='border-border/60 flex flex-col gap-3 border-y py-4'>
                           <SubHeading

@@ -49,9 +49,13 @@ import { Turnstile } from '@/components/turnstile'
 import { register, wechatLoginByCode } from '@/features/auth/api'
 import { LegalConsent } from '@/features/auth/components/legal-consent'
 import { OAuthProviders } from '@/features/auth/components/oauth-providers'
-import { registerFormSchema } from '@/features/auth/constants'
+import {
+  MAINLAND_PHONE_REGEX,
+  registerFormSchema,
+} from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useEmailVerification } from '@/features/auth/hooks/use-email-verification'
+import { useSMSVerification } from '@/features/auth/hooks/use-sms-verification'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import {
   getAffiliateCode,
@@ -65,6 +69,7 @@ export function SignUpForm({
   const { t } = useTranslation()
   const [isLoading, setIsLoading] = useState(false)
   const [verificationCode, setVerificationCode] = useState('')
+  const [smsVerificationCode, setSMSVerificationCode] = useState('')
   const [agreedToLegal, setAgreedToLegal] = useState(false)
   const [wechatCode, setWeChatCode] = useState('')
   const [isWeChatDialogOpen, setIsWeChatDialogOpen] = useState(false)
@@ -76,7 +81,9 @@ export function SignUpForm({
     isTurnstileEnabled,
     turnstileSiteKey,
     turnstileToken,
+    turnstileVersion,
     setTurnstileToken,
+    resetTurnstile,
     validateTurnstile,
   } = useTurnstile()
   const { redirectToLogin, handleLoginSuccess } = useAuthRedirect()
@@ -88,6 +95,15 @@ export function SignUpForm({
   } = useEmailVerification({
     turnstileToken,
     validateTurnstile,
+    onSent: resetTurnstile,
+  })
+  const {
+    isSending: isSendingSMSCode,
+    secondsLeft: smsSecondsLeft,
+    isActive: isSMSCountdownActive,
+    sendCode: sendSMSVerificationCode,
+  } = useSMSVerification({
+    purpose: 'register',
   })
 
   const form = useForm<z.infer<typeof registerFormSchema>>({
@@ -95,13 +111,18 @@ export function SignUpForm({
     defaultValues: {
       username: '',
       email: '',
+      phone: '',
       password: '',
       confirmPassword: '',
     },
   })
 
   const emailValue = form.watch('email')
+  const phoneValue = form.watch('phone')
   const emailVerificationRequired = !!status?.email_verification
+  const smsVerificationRequired = Boolean(
+    status?.sms_registration_required ?? status?.data?.sms_registration_required
+  )
   const hasUserAgreement = Boolean(status?.user_agreement_enabled)
   const hasPrivacyPolicy = Boolean(status?.privacy_policy_enabled)
   const requiresLegalConsent = hasUserAgreement || hasPrivacyPolicy
@@ -159,6 +180,17 @@ export function SignUpForm({
       }
     }
 
+    if (smsVerificationRequired) {
+      if (!data.phone || !MAINLAND_PHONE_REGEX.test(data.phone.trim())) {
+        toast.error(t('Please enter a valid mobile phone number'))
+        return
+      }
+      if (!/^\d{6}$/.test(smsVerificationCode.trim())) {
+        toast.error(t('Verification code must be 6 digits'))
+        return
+      }
+    }
+
     if (!validateTurnstile()) return
 
     setIsLoading(true)
@@ -168,6 +200,10 @@ export function SignUpForm({
         password: data.password,
         email: data.email || undefined,
         verification_code: verificationCode || undefined,
+        phone: smsVerificationRequired ? data.phone?.trim() : undefined,
+        sms_code: smsVerificationRequired
+          ? smsVerificationCode.trim()
+          : undefined,
         aff_code: getAffiliateCode(),
         turnstile: turnstileToken,
       })
@@ -187,6 +223,10 @@ export function SignUpForm({
 
   async function handleSendVerificationCode() {
     await sendCode(emailValue || '')
+  }
+
+  async function handleSendSMSCode() {
+    await sendSMSVerificationCode(phoneValue || '')
   }
 
   const handleOpenWeChatDialog = () => {
@@ -341,10 +381,75 @@ export function SignUpForm({
           </>
         )}
 
+        {smsVerificationRequired && (
+          <>
+            <FormField
+              control={form.control}
+              name='phone'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Mobile phone number')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder={t('Enter your 11-digit mobile phone number')}
+                      inputMode='tel'
+                      autoComplete='tel'
+                      maxLength={11}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <div className='grid gap-2'>
+              <Label htmlFor='signup-sms-code'>
+                {t('SMS verification code')}
+              </Label>
+              <div className='flex gap-2'>
+                <Input
+                  id='signup-sms-code'
+                  placeholder={t('Enter 6-digit code')}
+                  value={smsVerificationCode}
+                  onChange={(event) =>
+                    setSMSVerificationCode(event.target.value)
+                  }
+                  inputMode='numeric'
+                  autoComplete='one-time-code'
+                  maxLength={6}
+                />
+                <Button
+                  variant='outline'
+                  type='button'
+                  className='shrink-0'
+                  disabled={
+                    isLoading ||
+                    isSendingSMSCode ||
+                    isSMSCountdownActive ||
+                    !phoneValue ||
+                    !turnstileReady
+                  }
+                  onClick={handleSendSMSCode}
+                >
+                  {isSMSCountdownActive ? (
+                    t('Resend ({{seconds}}s)', { seconds: smsSecondsLeft })
+                  ) : isSendingSMSCode ? (
+                    <Loader2 className='h-4 w-4 animate-spin' />
+                  ) : (
+                    t('Send code')
+                  )}
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
+
         {/* Turnstile */}
         {isTurnstileEnabled && (
           <div className='mt-2'>
             <Turnstile
+              key={turnstileVersion}
               siteKey={turnstileSiteKey}
               onVerify={setTurnstileToken}
             />

@@ -26,6 +26,7 @@ import { EMAIL_VERIFICATION_COUNTDOWN } from '../constants'
 interface UseEmailVerificationOptions {
   turnstileToken?: string
   validateTurnstile?: () => boolean
+  onSent?: () => void
 }
 
 /**
@@ -58,6 +59,7 @@ export function useEmailVerification(options?: UseEmailVerificationOptions) {
       const res = await sendEmailVerification(email, options?.turnstileToken)
       if (res?.success) {
         startCountdown()
+        options?.onSent?.()
         toast.success(i18next.t('Verification email sent'))
         return true
       }

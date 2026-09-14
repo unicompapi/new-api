@@ -108,6 +108,14 @@ func InitEnv() {
 	// Initialize string variables with GetEnvOrDefaultString
 	GeminiSafetySetting = GetEnvOrDefaultString("GEMINI_SAFETY_SETTING", "BLOCK_NONE")
 	CohereSafetySetting = GetEnvOrDefaultString("COHERE_SAFETY_SETTING", "NONE")
+	SMSLoginEnabled = GetEnvOrDefaultBool("SMS_LOGIN_ENABLED", false)
+	SMSRegistrationRequired = GetEnvOrDefaultBool("SMS_REGISTRATION_REQUIRED", false)
+	AliyunSMSAccessKeyID = GetEnvOrDefaultString("ALIBABA_CLOUD_ACCESS_KEY_ID", "")
+	AliyunSMSAccessKeySecret = GetEnvOrDefaultString("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "")
+	AliyunSMSSignName = GetEnvOrDefaultString("ALIYUN_SMS_SIGN_NAME", "")
+	AliyunSMSTemplateCode = GetEnvOrDefaultString("ALIYUN_SMS_TEMPLATE_CODE", "")
+	AliyunGraphCaptchaAppID = GetEnvOrDefaultString("ALIYUN_GRAPH_CAPTCHA_APP_ID", "")
+	AliyunGraphCaptchaAppKey = GetEnvOrDefaultString("ALIYUN_GRAPH_CAPTCHA_APP_KEY", "")
 
 	// Initialize rate limit variables
 	GlobalApiRateLimitEnable = GetEnvOrDefaultBool("GLOBAL_API_RATE_LIMIT_ENABLE", true)
@@ -152,6 +160,8 @@ func initConstantEnv() {
 	constant.TaskQueryLimit = GetEnvOrDefault("TASK_QUERY_LIMIT", 1000)
 	// 异步任务超时时间（分钟），超过此时间未完成的任务将被标记为失败并退款。0 表示禁用。
 	constant.TaskTimeoutMinutes = GetEnvOrDefault("TASK_TIMEOUT_MINUTES", 1440)
+	// Docker runs from the persisted /data working directory, so this default survives restarts.
+	constant.TaskMediaDir = GetEnvOrDefaultString("TASK_MEDIA_DIR", "./task-media")
 
 	soraPatchStr := GetEnvOrDefaultString("TASK_PRICE_PATCH", "")
 	if soraPatchStr != "" {

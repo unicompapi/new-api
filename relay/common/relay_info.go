@@ -160,6 +160,8 @@ type RelayInfo struct {
 	// http.Request.ContentLength manually (net/http only auto-detects it for
 	// *bytes.Reader/Buffer/strings.Reader). 0 means "let net/http decide".
 	UpstreamRequestBodySize int64
+	// UpstreamRequestTimeoutSeconds overrides the shared relay timeout for one request.
+	UpstreamRequestTimeoutSeconds int
 
 	PriceData types.PriceData
 
@@ -671,7 +673,12 @@ type TaskRelayInfo struct {
 	OriginTaskID string
 	// PublicTaskID 是提交时预生成的 task_xxxx 格式公开 ID，
 	// 供 DoResponse 在返回给客户端时使用（避免暴露上游真实 ID）。
-	PublicTaskID string
+	PublicTaskID    string
+	InputMediaFile  string
+	InputMediaURL   string
+	InputMediaFiles []string
+	InputMediaURLs  map[string]string
+	InputMediaAudit string
 
 	ConsumeQuota bool
 
@@ -683,6 +690,11 @@ type TaskRelayInfo struct {
 
 type TaskMediaURL struct {
 	URL string `json:"url,omitempty"`
+}
+
+type TaskMediaItem struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
 }
 
 // TaskContentItem mirrors Seedance / Volcengine video content entries.
@@ -701,6 +713,7 @@ type TaskSubmitReq struct {
 	Mode           string                 `json:"mode,omitempty"`
 	Image          string                 `json:"image,omitempty"`
 	Images         []string               `json:"images,omitempty"`
+	Media          []TaskMediaItem        `json:"media,omitempty"`
 	Content        []TaskContentItem      `json:"content,omitempty"`
 	Size           string                 `json:"size,omitempty"`
 	Resolution     string                 `json:"resolution,omitempty"`
@@ -1096,6 +1109,8 @@ type TaskInfo struct {
 	Reason           string `json:"reason,omitempty"`
 	Url              string `json:"url,omitempty"`
 	RemoteUrl        string `json:"remote_url,omitempty"`
+	LastFrameURL     string `json:"last_frame_url,omitempty"`
+	PersistResult    bool   `json:"persist_result,omitempty"`
 	Progress         string `json:"progress,omitempty"`
 	CompletionTokens int    `json:"completion_tokens,omitempty"` // 用于按倍率计费
 	TotalTokens      int    `json:"total_tokens,omitempty"`      // 用于按倍率计费

@@ -316,6 +316,14 @@ docker run --name new-api -d --restart always \
 | `CRYPTO_SECRET` | Encryption secret (required for Redis) | - |
 | `SQL_DSN` | Database connection string | - |
 | `REDIS_CONN_STRING` | Redis connection string | - |
+| `SMS_LOGIN_ENABLED` | Enable mobile SMS-code login (requires Redis, Alibaba Cloud SMS, and Alibaba Cloud Graph CAPTCHA) | `false` |
+| `SMS_REGISTRATION_REQUIRED` | Require mobile verification for password registration; blocks automatic OAuth user creation | `false` |
+| `ALIBABA_CLOUD_ACCESS_KEY_ID` | Alibaba Cloud RAM user AccessKey ID | - |
+| `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | Alibaba Cloud RAM user AccessKey Secret | - |
+| `ALIYUN_SMS_SIGN_NAME` | Approved SMS signature with completed carrier registration | - |
+| `ALIYUN_SMS_TEMPLATE_CODE` | Verification template code containing the `${code}` variable | - |
+| `ALIYUN_GRAPH_CAPTCHA_APP_ID` | Alibaba Cloud H5 Graph CAPTCHA app ID (sent to the browser) | - |
+| `ALIYUN_GRAPH_CAPTCHA_APP_KEY` | Alibaba Cloud H5 Graph CAPTCHA server key | - |
 | `STREAMING_TIMEOUT` | Streaming timeout (seconds) | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | Max per-line buffer (MB) for the stream scanner; increase when upstream sends huge image/base64 payloads | `64` |
 | `MAX_REQUEST_BODY_MB` | Max request body size (MB, counted **after decompression**; prevents huge requests/zip bombs from exhausting memory). Exceeding it returns `413` | `32` |

@@ -8,12 +8,18 @@ import (
 )
 
 func SetVideoRouter(router *gin.Engine) {
+	videoInputRouter := router.Group("/v1")
+	videoInputRouter.Use(middleware.RouteTag("relay"))
+	videoInputRouter.GET("/video-inputs/:token", controller.VideoInputMedia)
+
 	// Video proxy: accepts either session auth (dashboard) or token auth (API clients)
 	videoProxyRouter := router.Group("/v1")
 	videoProxyRouter.Use(middleware.RouteTag("relay"))
 	videoProxyRouter.Use(middleware.TokenOrUserAuth())
 	{
 		videoProxyRouter.GET("/videos/:task_id/content", controller.VideoProxy)
+		videoProxyRouter.GET("/videos/:task_id/last_frame", controller.VideoLastFrameProxy)
+		videoProxyRouter.POST("/videos/:video_id/cancel", controller.VideoCancelUnsupported)
 	}
 
 	videoV1Router := router.Group("/v1")
@@ -22,6 +28,7 @@ func SetVideoRouter(router *gin.Engine) {
 	{
 		videoV1Router.POST("/video/generations", controller.RelayTask)
 		videoV1Router.GET("/video/generations/:task_id", controller.RelayTaskFetch)
+		videoV1Router.POST("/assets/:action", controller.RelayTokenPonyAsset)
 		videoV1Router.POST("/videos/:video_id/remix", controller.RelayTask)
 	}
 	// openai compatible API video routes

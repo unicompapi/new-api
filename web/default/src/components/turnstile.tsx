@@ -21,7 +21,8 @@ import { useEffect, useRef } from 'react'
 declare global {
   interface Window {
     turnstile?: {
-      render: (element: HTMLElement, options: Record<string, unknown>) => void
+      render: (element: HTMLElement, options: Record<string, unknown>) => string
+      remove?: (widgetId: string) => void
     }
   }
 }
@@ -42,14 +43,21 @@ export function Turnstile({
   const ref = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
+    let widgetId: string | undefined
     const render = () => {
       if (!ref.current || !window.turnstile) return
       try {
-        window.turnstile.render(ref.current, {
+        widgetId = window.turnstile.render(ref.current, {
           sitekey: siteKey,
           callback: (token: string) => onVerify(token),
-          'error-callback': () => onExpire?.(),
-          'expired-callback': () => onExpire?.(),
+          'error-callback': () => {
+            onVerify('')
+            onExpire?.()
+          },
+          'expired-callback': () => {
+            onVerify('')
+            onExpire?.()
+          },
         })
       } catch {
         /* empty */
@@ -58,18 +66,29 @@ export function Turnstile({
 
     if (window.turnstile) {
       render()
-      return
+      return () => {
+        if (widgetId) window.turnstile?.remove?.(widgetId)
+      }
     }
     const scriptId = 'cf-turnstile'
-    if (document.getElementById(scriptId)) return
-    const s = document.createElement('script')
-    s.id = scriptId
-    s.src =
-      'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
-    s.async = true
-    s.defer = true
-    s.onload = () => render()
-    document.head.appendChild(s)
+    let script = document.getElementById(scriptId) as HTMLScriptElement | null
+    if (script) {
+      script.addEventListener('load', render)
+    } else {
+      script = document.createElement('script')
+      script.id = scriptId
+      script.src =
+        'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+      script.async = true
+      script.defer = true
+      script.addEventListener('load', render)
+      document.head.appendChild(script)
+    }
+
+    return () => {
+      script?.removeEventListener('load', render)
+      if (widgetId) window.turnstile?.remove?.(widgetId)
+    }
   }, [siteKey, onVerify, onExpire])
 
   return <div ref={ref} className={className} />

@@ -495,6 +495,11 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	} else {
 		client = service.GetHttpClient()
 	}
+	if info.UpstreamRequestTimeoutSeconds > 0 {
+		clientCopy := *client
+		clientCopy.Timeout = time.Duration(info.UpstreamRequestTimeoutSeconds) * time.Second
+		client = &clientCopy
+	}
 
 	var stopPinger context.CancelFunc
 	if info.IsStream {
