@@ -542,6 +542,71 @@ func failureDetail(raw json.RawMessage) string {
 func (a *TaskAdaptor) GetModelList() []string { return ModelList }
 func (a *TaskAdaptor) GetChannelName() string { return ChannelName }
 
+// EstimateBilling adjusts TokenPony's per-token base price for resolution and
+// the provider's reference-video discount. The base ratios are the 720P rates
+// without a reference video.
+func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return nil
+	}
+	modelName := strings.TrimSpace(info.OriginModelName)
+	if modelName == "" {
+		modelName = strings.TrimSpace(req.Model)
+	}
+	payload, err := convertRequestPayload(&req, modelName)
+	if err != nil {
+		return nil
+	}
+	resolution := strings.ToUpper(strings.TrimSpace(payload.Resolution))
+	if resolution == "" {
+		resolution = "720P"
+	}
+	hasReferenceVideo := false
+	for _, media := range payload.Media {
+		if strings.TrimSpace(media.Type) == "reference_video" {
+			hasReferenceVideo = true
+			break
+		}
+	}
+
+	selectedPrice, basePrice, ok := tokenPonyVideoTokenPrice(modelName, resolution, hasReferenceVideo)
+	if !ok {
+		return nil
+	}
+	return map[string]float64{"tokenpony_variant": selectedPrice / basePrice}
+}
+
+func tokenPonyVideoTokenPrice(modelName, resolution string, hasReferenceVideo bool) (float64, float64, bool) {
+	is1080P := strings.EqualFold(strings.TrimSpace(resolution), "1080P")
+	switch modelName {
+	case ModelSeedance20:
+		if is1080P {
+			if hasReferenceVideo {
+				return 31, seedance20BaseTokenPrice, true
+			}
+			return 51, seedance20BaseTokenPrice, true
+		}
+		if hasReferenceVideo {
+			return 28, seedance20BaseTokenPrice, true
+		}
+		return seedance20BaseTokenPrice, seedance20BaseTokenPrice, true
+	case ModelSeedance25:
+		if is1080P {
+			if hasReferenceVideo {
+				return 33.12, seedance25BaseTokenPrice, true
+			}
+			return 55.44, seedance25BaseTokenPrice, true
+		}
+		if hasReferenceVideo {
+			return 42, seedance25BaseTokenPrice, true
+		}
+		return seedance25BaseTokenPrice, seedance25BaseTokenPrice, true
+	default:
+		return 0, 0, false
+	}
+}
+
 func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, result *relaycommon.TaskInfo) int {
 	if result.TotalTokens <= 0 || task.PrivateData.BillingContext == nil {
 		return 0
@@ -550,7 +615,14 @@ func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, result *relaycom
 	if billing.ModelRatio <= 0 || billing.GroupRatio <= 0 {
 		return 0
 	}
-	return int(float64(result.TotalTokens) * billing.ModelRatio * billing.GroupRatio)
+	quota := float64(result.TotalTokens) * billing.ModelRatio * billing.GroupRatio
+	for _, ratio := range billing.OtherRatios {
+		if ratio <= 0 {
+			return 0
+		}
+		quota *= ratio
+	}
+	return int(quota)
 }
 
 func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {

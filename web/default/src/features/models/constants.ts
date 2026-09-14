@@ -163,9 +163,10 @@ export const ENDPOINT_TEMPLATES: Record<
   'openai-response': { path: '/v1/responses', method: 'POST' },
   anthropic: { path: '/v1/messages', method: 'POST' },
   gemini: { path: '/v1beta/models/{model}:generateContent', method: 'POST' },
-  'jina-rerank': { path: '/rerank', method: 'POST' },
+  'jina-rerank': { path: '/v1/rerank', method: 'POST' },
   'image-generation': { path: '/v1/images/generations', method: 'POST' },
   embeddings: { path: '/v1/embeddings', method: 'POST' },
+  'openai-video': { path: '/v1/videos', method: 'POST' },
 }
 
 // ============================================================================

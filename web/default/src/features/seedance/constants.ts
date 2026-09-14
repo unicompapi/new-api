@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 export const SEEDANCE_MODELS = [
   'doubao-seedance-2-0-260128',
-  'doubao-seedance-2-0-fast-260128',
+  'doubao-seedance-2-5-260628',
 ] as const
 
 export const VIDEO_API = {
@@ -40,7 +40,7 @@ export const POLL_INTERVAL_MS = 3000
 export const SEEDANCE_HISTORY_STORAGE_KEY = 'seedance:history:v1'
 export const SEEDANCE_HISTORY_MAX_ITEMS = 50
 
-export const SEEDANCE_MODEL_PREFIX = 'doubao-seedance-2-0'
+export const SEEDANCE_MODEL_PREFIX = 'doubao-seedance-2-'
 
 /** Volcengine Seedance 2.0 supported resolutions */
 export const SEEDANCE_RESOLUTIONS = ['480p', '720p', '1080p'] as const
@@ -101,9 +101,10 @@ export const DEFAULT_GENERATION_SETTINGS: SeedanceGenerationSettings = {
 
 export function getDurationRange(model: string) {
   const isFast = model.includes('fast')
+  const isSeedance25 = model.includes('seedance-2-5')
   return {
     min: 4,
-    max: isFast ? 12 : 15,
+    max: isSeedance25 ? 30 : isFast ? 12 : 15,
     supportsAuto: true,
   }
 }
