@@ -36,7 +36,7 @@ func Login(c *gin.Context) {
 		return
 	}
 	var loginRequest LoginRequest
-	err := json.NewDecoder(c.Request.Body).Decode(&loginRequest)
+	err := common.DecodeJson(c.Request.Body, &loginRequest)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -65,6 +65,10 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	finishPrimaryLogin(&user, c)
+}
+
+func finishPrimaryLogin(user *model.User, c *gin.Context) {
 	// 检查是否启用2FA
 	if model.IsTwoFAEnabled(user.Id) {
 		// 设置pending session，等待2FA验证
@@ -87,7 +91,7 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	setupLogin(&user, c)
+	setupLogin(user, c)
 }
 
 // setup session & cookies and then return user info
@@ -145,10 +149,30 @@ func Register(c *gin.Context) {
 		return
 	}
 	var user model.User
-	err := json.NewDecoder(c.Request.Body).Decode(&user)
+	err := common.DecodeJson(c.Request.Body, &user)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
+	}
+	if common.SMSRegistrationRequired {
+		if !service.SMSVerificationAvailable() {
+			common.ApiErrorI18n(c, i18n.MsgUserSMSUnavailable)
+			return
+		}
+		if user.Phone == nil || strings.TrimSpace(*user.Phone) == "" || strings.TrimSpace(user.SMSCode) == "" {
+			common.ApiErrorI18n(c, i18n.MsgUserSMSVerificationRequired)
+			return
+		}
+		normalizedPhone, normalizeErr := service.NormalizeMainlandPhone(*user.Phone)
+		if normalizeErr != nil {
+			common.ApiErrorI18n(c, i18n.MsgUserPhoneInvalid)
+			return
+		}
+		user.Phone = &normalizedPhone
+	} else {
+		// Ignore unverified phone data when phone verification is not required.
+		user.Phone = nil
+		user.SMSCode = ""
 	}
 	if err := common.Validate.Struct(&user); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": err.Error()})
@@ -174,6 +198,26 @@ func Register(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserExists)
 		return
 	}
+	if common.SMSRegistrationRequired {
+		phoneExists, phoneErr := model.CheckPhoneExistOrDeleted(*user.Phone)
+		if phoneErr != nil {
+			common.ApiErrorI18n(c, i18n.MsgDatabaseError)
+			common.SysLog(fmt.Sprintf("CheckPhoneExistOrDeleted error: %v", phoneErr))
+			return
+		}
+		if phoneExists {
+			common.ApiErrorI18n(c, i18n.MsgUserVerificationCodeError)
+			return
+		}
+		if verifyErr := service.ConsumeSMSVerificationCode(*user.Phone, service.SMSPurposeRegister, user.SMSCode); verifyErr != nil {
+			if errors.Is(verifyErr, service.ErrSMSUnavailable) {
+				common.ApiErrorI18n(c, i18n.MsgUserSMSUnavailable)
+			} else {
+				common.ApiErrorI18n(c, i18n.MsgUserVerificationCodeError)
+			}
+			return
+		}
+	}
 	affCode := user.AffCode // this code is the inviter's code, not the user's own code
 	inviterId, _ := model.GetUserIdByAffCode(affCode)
 	cleanUser := model.User{
@@ -182,6 +226,7 @@ func Register(c *gin.Context) {
 		DisplayName: user.Username,
 		InviterId:   inviterId,
 		Role:        common.RoleCommonUser, // 明确设置角色为普通用户
+		Phone:       user.Phone,
 	}
 	if common.EmailVerificationEnabled {
 		cleanUser.Email = user.Email
@@ -263,8 +308,14 @@ func SearchUsers(c *gin.Context) {
 			status = &parsed
 		}
 	}
+	var phoneBound *bool
+	if phoneBoundStr := c.Query("phone_bound"); phoneBoundStr != "" {
+		if parsed, err := strconv.ParseBool(phoneBoundStr); err == nil {
+			phoneBound = &parsed
+		}
+	}
 	pageInfo := common.GetPageQuery(c)
-	users, total, err := model.SearchUsers(keyword, group, role, status, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	users, total, err := model.SearchUsers(keyword, group, role, status, phoneBound, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
 		return

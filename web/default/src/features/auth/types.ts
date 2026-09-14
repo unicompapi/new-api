@@ -28,6 +28,25 @@ export interface LoginPayload {
   turnstile?: string
 }
 
+export interface SMSLoginPayload {
+  phone: string
+  code: string
+  turnstile?: string
+}
+
+export interface AliyunGraphCaptchaValidation {
+  lot_number: string
+  captcha_output: string
+  pass_token: string
+  gen_time: string
+}
+
+export interface SMSCodePayload {
+  phone: string
+  purpose: 'login' | 'register'
+  graph_captcha: AliyunGraphCaptchaValidation
+}
+
 export interface TwoFAPayload {
   code: string
 }
@@ -37,6 +56,8 @@ export interface RegisterPayload {
   password: string
   email?: string
   verification_code?: string
+  phone?: string
+  sms_code?: string
   aff_code?: string
   turnstile?: string
 }
@@ -128,6 +149,9 @@ export interface SystemStatus {
     register_enabled?: boolean
     password_login_enabled?: boolean
     password_register_enabled?: boolean
+    sms_login_enabled?: boolean
+    sms_registration_required?: boolean
+    aliyun_graph_captcha_app_id?: string
     custom_oauth_providers?: CustomOAuthProviderInfo[]
     [key: string]: unknown
   }
@@ -171,6 +195,9 @@ export interface SystemStatus {
   register_enabled?: boolean
   password_login_enabled?: boolean
   password_register_enabled?: boolean
+  sms_login_enabled?: boolean
+  sms_registration_required?: boolean
+  aliyun_graph_captcha_app_id?: string
   custom_oauth_providers?: CustomOAuthProviderInfo[]
   [key: string]: unknown
 }

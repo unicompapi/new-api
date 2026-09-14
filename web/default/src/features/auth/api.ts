@@ -20,6 +20,8 @@ import { api } from '@/lib/api'
 import type {
   LoginPayload,
   LoginResponse,
+  SMSLoginPayload,
+  SMSCodePayload,
   Login2FAResponse,
   TwoFAPayload,
   RegisterPayload,
@@ -44,6 +46,29 @@ export async function login(payload: LoginPayload) {
       password: payload.password,
     }
   )
+  return res.data
+}
+
+export async function smsLogin(payload: SMSLoginPayload) {
+  const res = await api.post<LoginResponse>(
+    '/api/user/login/sms',
+    {
+      phone: payload.phone,
+      code: payload.code,
+    },
+    { params: { turnstile: payload.turnstile ?? '' } }
+  )
+  return res.data
+}
+
+export async function sendSMSCode(
+  payload: SMSCodePayload
+): Promise<ApiResponse> {
+  const res = await api.post('/api/user/sms/send', {
+    phone: payload.phone,
+    purpose: payload.purpose,
+    graph_captcha: payload.graph_captcha,
+  })
   return res.data
 }
 

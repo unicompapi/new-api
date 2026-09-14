@@ -90,6 +90,15 @@ var WeChatAuthEnabled = false
 var TelegramOAuthEnabled = false
 var TurnstileCheckEnabled = false
 var RegisterEnabled = true
+var SMSLoginEnabled = false
+var SMSRegistrationRequired = false
+
+var AliyunSMSAccessKeyID = ""
+var AliyunSMSAccessKeySecret = ""
+var AliyunSMSSignName = ""
+var AliyunSMSTemplateCode = ""
+var AliyunGraphCaptchaAppID = ""
+var AliyunGraphCaptchaAppKey = ""
 
 var EmailDomainRestrictionEnabled = false // 是否启用邮箱域名限制
 var EmailAliasRestrictionEnabled = false  // 是否启用邮箱别名限制

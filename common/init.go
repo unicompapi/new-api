@@ -108,6 +108,14 @@ func InitEnv() {
 	// Initialize string variables with GetEnvOrDefaultString
 	GeminiSafetySetting = GetEnvOrDefaultString("GEMINI_SAFETY_SETTING", "BLOCK_NONE")
 	CohereSafetySetting = GetEnvOrDefaultString("COHERE_SAFETY_SETTING", "NONE")
+	SMSLoginEnabled = GetEnvOrDefaultBool("SMS_LOGIN_ENABLED", false)
+	SMSRegistrationRequired = GetEnvOrDefaultBool("SMS_REGISTRATION_REQUIRED", false)
+	AliyunSMSAccessKeyID = GetEnvOrDefaultString("ALIBABA_CLOUD_ACCESS_KEY_ID", "")
+	AliyunSMSAccessKeySecret = GetEnvOrDefaultString("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "")
+	AliyunSMSSignName = GetEnvOrDefaultString("ALIYUN_SMS_SIGN_NAME", "")
+	AliyunSMSTemplateCode = GetEnvOrDefaultString("ALIYUN_SMS_TEMPLATE_CODE", "")
+	AliyunGraphCaptchaAppID = GetEnvOrDefaultString("ALIYUN_GRAPH_CAPTCHA_APP_ID", "")
+	AliyunGraphCaptchaAppKey = GetEnvOrDefaultString("ALIYUN_GRAPH_CAPTCHA_APP_KEY", "")
 
 	// Initialize rate limit variables
 	GlobalApiRateLimitEnable = GetEnvOrDefaultBool("GLOBAL_API_RATE_LIMIT_ENABLE", true)

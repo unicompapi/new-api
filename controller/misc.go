@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -90,6 +91,10 @@ func GetStatus(c *gin.Context) {
 		"register_enabled":              common.RegisterEnabled,
 		"password_login_enabled":        common.PasswordLoginEnabled,
 		"password_register_enabled":     common.PasswordRegisterEnabled,
+		"sms_login_enabled":             service.SMSLoginAvailable(),
+		"sms_registration_required":     common.SMSRegistrationRequired,
+		"aliyun_graph_captcha_app_id":   common.AliyunGraphCaptchaAppID,
+		"oauth_register_enabled":        common.RegisterEnabled && !common.SMSRegistrationRequired,
 		"default_use_auto_group":        setting.DefaultUseAutoGroup,
 
 		"usd_exchange_rate": operation_setting.USDExchangeRate,

@@ -316,6 +316,14 @@ docker run --name new-api -d --restart always \
 | `CRYPTO_SECRET` | 加密密钥（Redis 必须）                                               | - |
 | `SQL_DSN` | 数据库连接字符串                                                     | - |
 | `REDIS_CONN_STRING` | Redis 连接字符串                                                  | - |
+| `SMS_LOGIN_ENABLED` | 启用手机号验证码登录（需同时配置 Redis、阿里云短信和阿里云图形认证） | `false` |
+| `SMS_REGISTRATION_REQUIRED` | 强制密码注册验证手机号；启用后不允许 OAuth 自动创建新用户 | `false` |
+| `ALIBABA_CLOUD_ACCESS_KEY_ID` | 阿里云 RAM 用户 AccessKey ID | - |
+| `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | 阿里云 RAM 用户 AccessKey Secret | - |
+| `ALIYUN_SMS_SIGN_NAME` | 已审核并完成运营商报备的短信签名名称 | - |
+| `ALIYUN_SMS_TEMPLATE_CODE` | 包含 `${code}` 变量的验证码模板 Code | - |
+| `ALIYUN_GRAPH_CAPTCHA_APP_ID` | 阿里云 H5 图形认证 appId（会下发到浏览器） | - |
+| `ALIYUN_GRAPH_CAPTCHA_APP_KEY` | 阿里云 H5 图形认证服务端密钥 | - |
 | `STREAMING_TIMEOUT` | 流式超时时间（秒）                                                    | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | 流式扫描器单行最大缓冲（MB），图像生成等超大 `data:` 片段（如 4K 图片 base64）需适当调大 | `64` |
 | `MAX_REQUEST_BODY_MB` | 请求体最大大小（MB，**解压后**计；防止超大请求/zip bomb 导致内存暴涨），超过将返回 `413` | `32` |

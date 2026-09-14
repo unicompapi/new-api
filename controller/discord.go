@@ -140,7 +140,7 @@ func DiscordOAuth(c *gin.Context) {
 			return
 		}
 	} else {
-		if common.RegisterEnabled {
+		if common.RegisterEnabled && !common.SMSRegistrationRequired {
 			if discordUser.ID != "" {
 				user.Username = discordUser.ID
 			} else {

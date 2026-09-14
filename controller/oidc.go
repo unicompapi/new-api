@@ -142,7 +142,7 @@ func OidcAuth(c *gin.Context) {
 			return
 		}
 	} else {
-		if common.RegisterEnabled {
+		if common.RegisterEnabled && !common.SMSRegistrationRequired {
 			user.Email = oidcUser.Email
 			if oidcUser.PreferredUsername != "" {
 				user.Username = oidcUser.PreferredUsername
