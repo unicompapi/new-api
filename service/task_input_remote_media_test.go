@@ -48,7 +48,7 @@ func TestPersistTaskInputRemoteMediaHTTPSAndRedirects(t *testing.T) {
 		assert.NotEmpty(t, audit.SourceHash)
 		assert.NotEmpty(t, audit.ExpiresAtUTC)
 		assert.True(t, strings.HasPrefix(publicURL, "https://gateway.example/v1/video-inputs/"))
-		stored, mimeType, err := ResolveTaskInputMedia(strings.TrimPrefix(relative, "inputs/"))
+		stored, mimeType, err := ResolveTaskInputMedia(filepath.Base(relative))
 		require.NoError(t, err)
 		assert.Equal(t, "image/png", mimeType)
 		data, err := os.ReadFile(stored)
