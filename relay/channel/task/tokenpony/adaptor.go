@@ -574,7 +574,52 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	if !ok {
 		return nil
 	}
-	return map[string]float64{"tokenpony_variant": selectedPrice / basePrice}
+	return map[string]float64{
+		"tokenpony_variant": selectedPrice / basePrice,
+		"tokenpony_reserve": tokenPonyReserveRatio(payload),
+	}
+}
+
+// tokenPonyReserveRatio replaces the generic task reservation (which assumes
+// 250k tokens) with a duration/resolution estimate. The coefficients come from
+// completed TokenPony tasks and include a 20% safety margin. Final settlement
+// ignores this reservation-only ratio and always uses upstream total_tokens.
+func tokenPonyReserveRatio(payload *requestPayload) float64 {
+	if payload == nil {
+		return 1
+	}
+	duration := 5
+	if payload.Duration != nil {
+		value := int(*payload.Duration)
+		if value == -1 {
+			return 1
+		}
+		if value > 0 {
+			duration = value
+		}
+	}
+
+	var estimatedTokens float64
+	switch strings.ToUpper(strings.TrimSpace(payload.Resolution)) {
+	case "480P":
+		estimatedTokens = float64(10200*duration + 1000)
+	case "1080P":
+		estimatedTokens = float64(48600*duration + 2025)
+	default:
+		estimatedTokens = float64(21600*duration + 900)
+	}
+
+	referenceVideos := 0
+	otherMedia := 0
+	for _, media := range payload.Media {
+		if strings.TrimSpace(media.Type) == "reference_video" {
+			referenceVideos++
+		} else {
+			otherMedia++
+		}
+	}
+	mediaMultiplier := 1 + float64(referenceVideos) + 0.25*float64(otherMedia)
+	return estimatedTokens * tokenPonyReserveSafety * mediaMultiplier / tokenPonyBaseReserveTokens
 }
 
 func tokenPonyVideoTokenPrice(modelName, resolution string, hasReferenceVideo bool) (float64, float64, bool) {
@@ -616,7 +661,10 @@ func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, result *relaycom
 		return 0
 	}
 	quota := float64(result.TotalTokens) * billing.ModelRatio * billing.GroupRatio
-	for _, ratio := range billing.OtherRatios {
+	for name, ratio := range billing.OtherRatios {
+		if name == "tokenpony_reserve" {
+			continue
+		}
 		if ratio <= 0 {
 			return 0
 		}
