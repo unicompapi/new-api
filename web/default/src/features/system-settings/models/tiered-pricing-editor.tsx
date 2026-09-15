@@ -406,6 +406,7 @@ function DraftNumberInput({
     <Input
       {...props}
       type='number'
+      step='any'
       value={draft}
       onChange={handleChange}
       onFocus={handleFocus}

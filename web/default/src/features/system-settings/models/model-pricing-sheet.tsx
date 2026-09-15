@@ -992,6 +992,8 @@ function PriceInput(props: {
     <InputGroup>
       <InputGroupAddon>$</InputGroupAddon>
       <InputGroupInput
+        type='number'
+        step='any'
         inputMode='decimal'
         value={props.value}
         placeholder={props.placeholder}

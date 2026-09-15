@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 import { api, getCommonHeaders } from '@/lib/api'
 import { VIDEO_API } from './constants'
 import type {
@@ -87,7 +86,10 @@ export async function getSeedanceModels(): Promise<ModelOption[]> {
   }
 
   return (data.data as string[])
-    .filter((model) => model.includes('seedance-2-0'))
+    .filter(
+      (model) =>
+        model.includes('seedance-2-0') || model.includes('seedance-2-5')
+    )
     .map((model) => ({
       label: model,
       value: model,

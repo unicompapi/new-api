@@ -325,6 +325,44 @@ export const ModelRatioForm = memo(function ModelRatioForm({
 
             <FormField
               control={form.control}
+              name='BillingMode'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Billing Mode')}</FormLabel>
+                  <FormControl>
+                    <Textarea rows={6} {...field} />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'JSON map of model → billing mode. Use `tiered_expr` for models with tiered pricing.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='BillingExpr'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Special billing expression')}</FormLabel>
+                  <FormControl>
+                    <Textarea rows={10} {...field} />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'JSON map of model → billing expression for context-length or request-dependent pricing.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
               name='ExposeRatioEnabled'
               render={({ field }) => (
                 <SettingsSwitchItem>

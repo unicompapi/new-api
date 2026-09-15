@@ -372,9 +372,45 @@ func TestBuildRequestBodyRejectsFixedPriceBilling(t *testing.T) {
 
 func TestUsageBillingUsesFrozenTaskRatios(t *testing.T) {
 	adaptor := &TaskAdaptor{}
-	task := &model.Task{PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{ModelRatio: 1.25, GroupRatio: 2}}}
-	assert.Equal(t, 250, adaptor.AdjustBillingOnComplete(task, &relaycommon.TaskInfo{TotalTokens: 100}))
+	task := &model.Task{PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+		ModelRatio: 1.25, GroupRatio: 2, OtherRatios: map[string]float64{
+			"tokenpony_variant": 0.5,
+			"tokenpony_reserve": 0.2,
+		},
+	}}}
+	assert.Equal(t, 125, adaptor.AdjustBillingOnComplete(task, &relaycommon.TaskInfo{TotalTokens: 100}))
 	assert.Zero(t, adaptor.AdjustBillingOnComplete(task, &relaycommon.TaskInfo{}))
+}
+
+func TestEstimateBillingUsesResolutionAndReferenceVideoPrices(t *testing.T) {
+	tests := []struct {
+		name        string
+		model       string
+		resolution  string
+		duration    int
+		media       []relaycommon.TaskMediaItem
+		wantPrice   float64
+		wantReserve float64
+	}{
+		{name: "2.0 720p text", model: ModelSeedance20, resolution: "720P", duration: 5, wantPrice: 1, wantReserve: 130680.0 / 250000.0},
+		{name: "2.0 720p reference video", model: ModelSeedance20, resolution: "720P", duration: 5, media: []relaycommon.TaskMediaItem{{Type: "reference_video", URL: "https://example.com/ref.mp4"}}, wantPrice: 28.0 / 46.0, wantReserve: 261360.0 / 250000.0},
+		{name: "2.0 1080p text", model: ModelSeedance20, resolution: "1080P", duration: 7, wantPrice: 51.0 / 46.0, wantReserve: 410670.0 / 250000.0},
+		{name: "2.5 480p text", model: ModelSeedance25, resolution: "480P", duration: 4, wantPrice: 1, wantReserve: 50160.0 / 250000.0},
+		{name: "2.5 720p reference video", model: ModelSeedance25, resolution: "720P", duration: 5, media: []relaycommon.TaskMediaItem{{Type: "reference_video", URL: "https://example.com/ref.mp4"}}, wantPrice: 42.0 / 70.0, wantReserve: 261360.0 / 250000.0},
+		{name: "2.5 1080p text", model: ModelSeedance25, resolution: "1080P", duration: 7, wantPrice: 55.44 / 70.0, wantReserve: 410670.0 / 250000.0},
+		{name: "2.5 1080p reference video", model: ModelSeedance25, resolution: "1080P", duration: 7, media: []relaycommon.TaskMediaItem{{Type: "reference_video", URL: "https://example.com/ref.mp4"}}, wantPrice: 33.12 / 70.0, wantReserve: 821340.0 / 250000.0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Set("task_request", relaycommon.TaskSubmitReq{Model: tt.model, Prompt: "x", Resolution: tt.resolution, Duration: tt.duration, Media: tt.media})
+			got := (&TaskAdaptor{}).EstimateBilling(ctx, &relaycommon.RelayInfo{OriginModelName: tt.model})
+			require.Contains(t, got, "tokenpony_variant")
+			assert.InDelta(t, tt.wantPrice, got["tokenpony_variant"], 1e-12)
+			assert.InDelta(t, tt.wantReserve, got["tokenpony_reserve"], 1e-12)
+		})
+	}
 }
 
 func TestAssetReferencesRequireActiveGetAssetResult(t *testing.T) {

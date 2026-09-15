@@ -16,10 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect } from 'react'
 import { Gift, ExternalLink, Loader2, Receipt, WalletCards } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { formatNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -110,14 +108,8 @@ export function RechargeFormCard({
   enableWaffoPancakeTopup,
 }: RechargeFormCardProps) {
   const { t } = useTranslation()
-  const [localAmount, setLocalAmount] = useState(topupAmount.toString())
-
-  useEffect(() => {
-    setLocalAmount(topupAmount.toString())
-  }, [topupAmount])
 
   const handleAmountChange = (value: string) => {
-    setLocalAmount(value)
     const numValue = parseInt(value) || 0
     if (numValue >= 0) {
       onTopupAmountChange(numValue)
@@ -197,7 +189,7 @@ export function RechargeFormCard({
             variant='outline'
             size='sm'
             onClick={onOpenBilling}
-            className='w-full gap-2 sm:w-auto'
+            className='h-11 w-full gap-2 sm:h-9 sm:w-auto'
           >
             <Receipt className='h-4 w-4' />
             {t('Order History')}
@@ -214,7 +206,7 @@ export function RechargeFormCard({
               {presetAmounts.length > 0 && (
                 <div className='space-y-2.5 sm:space-y-3'>
                   <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
-                    {t('Amount')}
+                    {t('Recharge Amount')}
                   </Label>
                   <div className='grid grid-cols-2 gap-1.5 sm:gap-3 md:grid-cols-4'>
                     {presetAmounts.map((preset, index) => {
@@ -238,29 +230,30 @@ export function RechargeFormCard({
                           key={index}
                           variant='outline'
                           className={cn(
-                            'hover:border-foreground flex min-h-16 flex-col items-start rounded-lg px-3 py-2.5 text-left whitespace-normal sm:min-h-[72px] sm:p-4',
+                            'hover:border-primary/60 flex min-h-[76px] flex-col items-center justify-center rounded-lg px-3 py-2.5 text-center whitespace-normal transition-colors sm:min-h-20 sm:p-4',
                             selectedPreset === preset.value
-                              ? 'border-foreground bg-foreground/5 dark:border-foreground dark:bg-foreground/10'
+                              ? 'border-primary bg-primary/5 ring-primary/20 ring-1'
                               : 'border-muted'
                           )}
                           onClick={() => onSelectPreset(preset)}
+                          aria-pressed={selectedPreset === preset.value}
                         >
                           <div className='flex w-full items-center justify-between'>
-                            <div className='text-base font-semibold sm:text-lg'>
-                              {formatNumber(displayValue)}
+                            <div className='w-full text-lg font-semibold tabular-nums sm:text-xl'>
+                              {formatCurrency(displayValue)}
                             </div>
                             {hasDiscount && (
-                              <div className='text-xs font-medium text-green-600'>
-                                {getDiscountLabel(discount)}
+                              <div className='ml-2 shrink-0 text-xs font-medium text-green-600'>
+                                {getDiscountLabel(discount, t('% off'))}
                               </div>
                             )}
                           </div>
-                          <div className='text-muted-foreground mt-1.5 w-full text-xs sm:mt-2'>
-                            Pay {formatCurrency(actualPrice)}
+                          <div className='text-muted-foreground mt-1.5 w-full text-xs tabular-nums sm:mt-2'>
+                            {t('Actual Amount')} {formatCurrency(actualPrice)}
                             {hasDiscount && savedAmount > 0 && (
                               <span className='text-green-600'>
                                 {' '}
-                                • Save {formatCurrency(savedAmount)}
+                                · {t('You save')} {formatCurrency(savedAmount)}
                               </span>
                             )}
                           </div>
@@ -278,24 +271,31 @@ export function RechargeFormCard({
                 >
                   {t('Custom Amount')}
                 </Label>
-                <div className='grid grid-cols-[minmax(0,1fr)_minmax(110px,0.55fr)] gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center'>
+                <div className='grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(160px,0.45fr)] sm:items-center lg:grid-cols-[minmax(0,1fr)_auto]'>
                   <Input
                     id='topup-amount'
                     type='number'
-                    value={localAmount}
+                    inputMode='numeric'
+                    value={topupAmount || ''}
                     onChange={(e) => handleAmountChange(e.target.value)}
                     min={minTopup}
-                    placeholder={`Minimum ${minTopup}`}
-                    className='h-9 text-base sm:h-10 sm:text-lg'
+                    step={1}
+                    placeholder={`${t('Minimum top-up quantity')}: ${minTopup}`}
+                    aria-describedby='topup-amount-summary'
+                    className='h-11 text-base sm:text-lg'
                   />
-                  <div className='bg-muted/30 flex min-h-9 items-center justify-between gap-2 rounded-md border px-3 lg:min-w-52'>
+                  <div
+                    id='topup-amount-summary'
+                    className='bg-muted/30 flex min-h-11 items-center justify-between gap-2 rounded-md border px-3 lg:min-w-52'
+                    aria-live='polite'
+                  >
                     <span className='text-muted-foreground truncate text-xs'>
                       {t('Amount to pay:')}
                     </span>
                     {calculating ? (
                       <Skeleton className='h-5 w-16' />
                     ) : (
-                      <span className='text-sm font-semibold'>
+                      <span className='text-sm font-semibold tabular-nums'>
                         {formatCurrency(paymentAmount)}
                       </span>
                     )}
@@ -319,7 +319,7 @@ export function RechargeFormCard({
                           variant='outline'
                           onClick={() => onPaymentMethodSelect(method)}
                           disabled={disabled || !!paymentLoading}
-                          className='h-9 min-w-0 justify-start gap-2 rounded-lg px-3'
+                          className='h-11 min-w-0 justify-start gap-2 rounded-lg px-3'
                         >
                           {paymentLoading === method.type ? (
                             <Loader2 className='h-4 w-4 animate-spin' />
@@ -381,7 +381,7 @@ export function RechargeFormCard({
                             variant='outline'
                             onClick={() => onWaffoMethodSelect(method, index)}
                             disabled={belowMin || !!paymentLoading}
-                            className='h-9 min-w-0 justify-start gap-2 rounded-lg px-3'
+                            className='h-11 min-w-0 justify-start gap-2 rounded-lg px-3'
                           >
                             {paymentLoading === loadingKey ? (
                               <Loader2 className='h-4 w-4 animate-spin' />
@@ -463,13 +463,13 @@ export function RechargeFormCard({
               value={redemptionCode}
               onChange={(e) => onRedemptionCodeChange(e.target.value)}
               placeholder={t('Enter your redemption code')}
-              className='h-9 min-w-0'
+              className='h-11 min-w-0'
             />
             <Button
               onClick={onRedeem}
               disabled={redeeming}
               variant='outline'
-              className='h-9 px-4'
+              className='h-11 px-4'
             >
               {redeeming && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
               {t('Redeem')}

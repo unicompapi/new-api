@@ -12,6 +12,13 @@ const (
 
 var ModelList = []string{ModelSeedance20, ModelSeedance25}
 
+const (
+	seedance20BaseTokenPrice   = 46.0
+	seedance25BaseTokenPrice   = 70.0
+	tokenPonyBaseReserveTokens = 250000.0
+	tokenPonyReserveSafety     = 1.2
+)
+
 var allowedAssetActions = map[string]struct{}{
 	"CreateAssetGroup":            {},
 	"GetAssetGroup":               {},
