@@ -16,9 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import z from 'zod'
 import { createFileRoute } from '@tanstack/react-router'
 import { DownloadPage } from '@/features/download'
+import { DOWNLOAD_TAB_IDS } from '@/features/download/constants'
+
+const downloadSearchSchema = z.object({
+  tab: z.enum(DOWNLOAD_TAB_IDS).optional().catch(undefined),
+})
 
 export const Route = createFileRoute('/download/')({
+  validateSearch: downloadSearchSchema,
   component: DownloadPage,
 })

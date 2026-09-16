@@ -30,6 +30,8 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/about", controller.GetAbout)
 		apiRouter.GET("/download/windows/count", controller.GetWindowsDownloadCount)
 		apiRouter.POST("/download/windows", controller.DownloadWindows)
+		apiRouter.GET("/download/unicomp/windows/count", controller.GetUniCompWindowsDownloadCount)
+		apiRouter.POST("/download/unicomp/windows", controller.DownloadUniCompWindows)
 		//apiRouter.GET("/midjourney", controller.GetMidjourney)
 		apiRouter.GET("/home_page_content", controller.GetHomePageContent)
 		apiRouter.GET("/pricing", middleware.HeaderNavModuleAuth("pricing"), controller.GetPricing)
