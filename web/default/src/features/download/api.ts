@@ -24,9 +24,16 @@ type DownloadCountResponse = {
   data: { count: number }
 }
 
-async function getDownloadCount(endpoint: string) {
-  const res = await api.get<DownloadCountResponse>(endpoint)
-  return res.data.data.count
+async function getDownloadCount(endpoint: string): Promise<number | null> {
+  try {
+    const res = await api.get<DownloadCountResponse>(endpoint, {
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    })
+    return res.data.data.count
+  } catch {
+    return null
+  }
 }
 
 export function getWindowsDownloadCount() {

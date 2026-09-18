@@ -39,11 +39,11 @@ import type { DownloadProductContent } from './product-content'
 
 type DownloadProductProps = {
   content: DownloadProductContent
-  downloadCount?: number
+  downloadCount?: number | null
   isCountPending: boolean
 }
 
-function DownloadCount(props: { count?: number; isPending: boolean }) {
+function DownloadCount(props: { count?: number | null; isPending: boolean }) {
   const { i18n, t } = useTranslation()
 
   if (props.isPending) {
@@ -55,7 +55,7 @@ function DownloadCount(props: { count?: number; isPending: boolean }) {
     )
   }
 
-  if (props.count === undefined) {
+  if (props.count == null) {
     return null
   }
 

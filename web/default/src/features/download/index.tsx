@@ -43,19 +43,20 @@ export function DownloadPage() {
   const { t } = useTranslation()
   const { tab } = useSearch({ from: '/download/' })
   const navigate = useNavigate()
+  const activeTab: DownloadTabId = tab ?? DOWNLOAD_DEFAULT_TAB_ID
   const windowsDownloadCountQuery = useQuery({
     queryKey: ['windows-download-count'],
     queryFn: getWindowsDownloadCount,
+    enabled: activeTab === UNICOMP_AI_TAB_ID,
   })
   const uniCompDownloadCountQuery = useQuery({
     queryKey: ['unicomp-windows-download-count'],
     queryFn: getUniCompWindowsDownloadCount,
+    enabled: activeTab === UNICOMP_DESKTOP_TAB_ID,
   })
 
   const uniCompAiContent = getUniCompAiContent(t)
   const uniCompDesktopContent = getUniCompDesktopContent(t)
-
-  const activeTab: DownloadTabId = tab ?? DOWNLOAD_DEFAULT_TAB_ID
 
   const handleTabChange = (value: string) => {
     void navigate({
@@ -87,7 +88,7 @@ export function DownloadPage() {
           >
             <TabsTrigger
               value={UNICOMP_AI_TAB_ID}
-              className='h-auto min-h-10 min-w-0 px-3 py-2 whitespace-normal'
+              className='h-auto min-h-11 min-w-0 px-3 py-2 whitespace-normal'
             >
               <HugeiconsIcon
                 icon={AiComputerIcon}
@@ -98,7 +99,7 @@ export function DownloadPage() {
             </TabsTrigger>
             <TabsTrigger
               value={UNICOMP_DESKTOP_TAB_ID}
-              className='h-auto min-h-10 min-w-0 px-3 py-2 whitespace-normal'
+              className='h-auto min-h-11 min-w-0 px-3 py-2 whitespace-normal'
             >
               <HugeiconsIcon
                 icon={ComputerProgramming01Icon}
