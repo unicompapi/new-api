@@ -1,10 +1,14 @@
 package model
 
 import (
+	"errors"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
+// DownloadStat keeps the cumulative download counter of a downloadable product.
+// Key identifies the product; Count is the number of times it was downloaded.
 type DownloadStat struct {
 	Key   string `json:"key" gorm:"primaryKey;size:64"`
 	Count int64  `json:"count" gorm:"not null;default:0"`
@@ -12,11 +16,17 @@ type DownloadStat struct {
 
 func GetDownloadCount(key string) (int64, error) {
 	var stat DownloadStat
-	err := DB.First(&stat, "key = ?", key).Error
-	if err == gorm.ErrRecordNotFound {
+	// Key is a reserved word in MySQL, so the condition has to let GORM quote
+	// the column: a raw condition such as "key = ?" is emitted unquoted and
+	// fails on MySQL. The map form quotes the column on all three dialects.
+	err := DB.Where(map[string]interface{}{"key": key}).First(&stat).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return 0, nil
 	}
-	return stat.Count, err
+	if err != nil {
+		return 0, err
+	}
+	return stat.Count, nil
 }
 
 func IncrementDownloadCount(key string) (int64, error) {
