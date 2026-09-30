@@ -78,6 +78,20 @@ func validatePrompt(prompt string) *dto.TaskError {
 	return nil
 }
 
+func supportsMediaOnlyTask(req TaskSubmitReq, info *RelayInfo) bool {
+	models := []string{req.Model}
+	if info != nil {
+		models = append(models, info.OriginModelName, info.UpstreamModelName)
+	}
+	for _, model := range models {
+		switch strings.ToLower(strings.TrimSpace(model)) {
+		case "wan3.0-video", "wan3.0-video-prime":
+			return true
+		}
+	}
+	return false
+}
+
 func validateMultipartTaskRequest(c *gin.Context, info *RelayInfo, action string) (TaskSubmitReq, error) {
 	var req TaskSubmitReq
 	if _, err := c.MultipartForm(); err != nil {
@@ -148,11 +162,14 @@ func ValidateMultipartDirect(c *gin.Context, info *RelayInfo) *dto.TaskError {
 		return createTaskError(fmt.Errorf("model field is required"), "missing_model", http.StatusBadRequest, true)
 	}
 
-	if req.HasImage() {
+	if req.HasInputMedia() {
 		hasInputReference = true
 	}
 
-	if taskErr := validatePrompt(prompt); taskErr != nil {
+	if strings.TrimSpace(prompt) == "" && supportsMediaOnlyTask(req, info) && req.HasInputMedia() {
+		// Wan 3.0 accepts media-only requests; prompt and media are
+		// conditionally required by the upstream API.
+	} else if taskErr := validatePrompt(prompt); taskErr != nil {
 		return taskErr
 	}
 

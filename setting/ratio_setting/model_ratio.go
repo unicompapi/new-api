@@ -283,9 +283,15 @@ var defaultModelRatio = map[string]float64{
 }
 
 var defaultModelPrice = map[string]float64{
-	"suno_music":                     0.1,
-	"suno_lyrics":                    0.01,
-	"dall-e-3":                       0.04,
+	"suno_music":  0.1,
+	"suno_lyrics": 0.01,
+	"dall-e-3":    0.04,
+	// Qwen Image prices are listed by Alibaba Cloud in CNY per generated image.
+	// Store the USD equivalent used by the quota system.
+	"qwen-image-3.0":                 0.18 / USD2RMB, // ¥0.18 per 1K/2K output image
+	"qwen-image-3.0-pro":             0.25 / USD2RMB, // ¥0.25 per 1K output image; 2K is ¥0.50
+	"qwen-image-2.0":                 0.2 / USD2RMB,  // ¥0.20 per output image
+	"qwen-image-2.0-pro":             0.5 / USD2RMB,  // ¥0.50 per output image
 	"imagen-3.0-generate-002":        0.03,
 	"black-forest-labs/flux-1.1-pro": 0.04,
 	"gpt-4-gizmo-*":                  0.1,
@@ -322,6 +328,10 @@ var defaultModelPrice = map[string]float64{
 	"happyhorse-1.1-r2v":        0.9,
 	"happyhorse-1.0-r2v":        0.9,
 	"happyhorse-1.0-video-edit": 0.9,
+	// Wan 3.0 视频：固定单价为 720P 下每秒人民币价格（元/秒）。
+	// 480P/1080P 的官方价格倍率由 Ali task adaptor 按分辨率补充。
+	"wan3.0-video":       0.6,
+	"wan3.0-video-prime": 0.9,
 	// kling v3 视频：固定单价为 720P 下每秒人民币价格（元/秒），非美元；计费时自动按汇率换算
 	// 720P: ¥0.8/s (baseline)，1080P: ¥1.0/s (×1.25)
 	"kling-v3-turbo": 0.8,
@@ -339,14 +349,14 @@ var defaultModelPrice = map[string]float64{
 	"viduq3":          0.1875, // 参考生 720p 错峰 6c/s
 	"viduq3-mix":      0.75,   // 参考生 720p 峰值 24c/s，不支持错峰
 	// 豆包 Seedream 图片生成：固定单价（每张图片），计费单位与系统 quota 一致，不做汇率换算
-	"doubao-seedream-3-0":      0.22,
+	"doubao-seedream-3-0":        0.22,
 	"doubao-seedream-4-0-250828": 0.22,
 	"doubao-seedream-4-5-251128": 0.22,
 	"doubao-seedream-5-0-260128": 0.22,
-	"seedream-3-0":              0.22,
-	"seedream-4-0-250828":       0.22,
-	"seedream-4-5-251128":       0.22,
-	"seedream-5-0-260128":       0.22,
+	"seedream-3-0":               0.22,
+	"seedream-4-0-250828":        0.22,
+	"seedream-4-5-251128":        0.22,
+	"seedream-5-0-260128":        0.22,
 }
 
 var defaultAudioRatio = map[string]float64{
@@ -421,17 +431,19 @@ func UpdateModelPriceByJSONString(jsonStr string) error {
 
 // IsCNYModelPrice reports whether model price is stored in CNY rather than USD.
 // happyhorse models store CNY per second (720P baseline).
+// wan3.0 models store CNY per second (720P baseline).
 // kling-v3 models store CNY per second (720P baseline).
 // viduq3 models store CNY per second (720P baseline).
 func IsCNYModelPrice(name string) bool {
 	lower := strings.ToLower(FormatMatchingModelName(name))
 	return strings.Contains(lower, "happyhorse") ||
+		strings.HasPrefix(lower, "wan3.0-video") ||
 		strings.HasPrefix(lower, "kling-v3") ||
 		strings.HasPrefix(lower, "viduq3")
 }
 
 // ModelPriceToUSD converts stored model price to USD for quota calculation.
-// Most models store USD; happyhorse stores CNY per second.
+// Most models store USD; video models listed above store CNY per second.
 func ModelPriceToUSD(name string, price float64) float64 {
 	if !IsCNYModelPrice(name) {
 		return price

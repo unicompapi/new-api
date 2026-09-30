@@ -13,6 +13,14 @@ func TestModelPriceToUSDHappyHorse(t *testing.T) {
 	require.InDelta(t, 0.9/7.3, ModelPriceToUSD("happyhorse-1.1-t2v", 0.9), 0.000001)
 }
 
+func TestModelPriceToUSDWan3(t *testing.T) {
+	operation_setting.USDExchangeRate = 7.3
+	require.True(t, IsCNYModelPrice("wan3.0-video"))
+	require.True(t, IsCNYModelPrice("wan3.0-video-prime"))
+	require.InDelta(t, 0.6/7.3, ModelPriceToUSD("wan3.0-video", 0.6), 0.000001)
+	require.InDelta(t, 0.9/7.3, ModelPriceToUSD("wan3.0-video-prime", 0.9), 0.000001)
+}
+
 func TestModelPriceToUSDRegularModel(t *testing.T) {
 	operation_setting.USDExchangeRate = 7.3
 	require.False(t, IsCNYModelPrice("sora-2"))

@@ -16,6 +16,11 @@ var defaultQwenSettings = QwenSettings{
 	SyncImageModels: []string{
 		"z-image",
 		"qwen-image",
+		// Qwen Image 2.0/3.0 are synchronous DashScope multimodal models.
+		"qwen-image-3.0",
+		"qwen-image-3.0-pro",
+		"qwen-image-2.0",
+		"qwen-image-2.0-pro",
 		"wan2.6",
 		"wan2.7",
 		"qwen-image-edit",
