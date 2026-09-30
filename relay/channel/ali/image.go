@@ -2,11 +2,13 @@ package ali
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,19 +27,14 @@ func oaiImage2AliImageRequest(info *relaycommon.RelayInfo, request dto.ImageRequ
 	var imageRequest AliImageRequest
 	imageRequest.Model = request.Model
 	imageRequest.ResponseFormat = request.ResponseFormat
+	hasParameters := false
 	if request.Extra != nil {
 		if val, ok := request.Extra["parameters"]; ok {
 			err := common.Unmarshal(val, &imageRequest.Parameters)
 			if err != nil {
 				return nil, fmt.Errorf("invalid parameters field: %w", err)
 			}
-		} else {
-			// 兼容没有parameters字段的情况，从openai标准字段中提取参数
-			imageRequest.Parameters = AliImageParameters{
-				Size:      strings.Replace(request.Size, "x", "*", -1),
-				N:         int(lo.FromPtrOr(request.N, uint(1))),
-				Watermark: request.Watermark,
-			}
+			hasParameters = true
 		}
 		if val, ok := request.Extra["input"]; ok {
 			err := common.Unmarshal(val, &imageRequest.Input)
@@ -45,6 +42,17 @@ func oaiImage2AliImageRequest(info *relaycommon.RelayInfo, request dto.ImageRequ
 				return nil, fmt.Errorf("invalid input field: %w", err)
 			}
 		}
+	}
+	if !hasParameters {
+		// 兼容没有parameters字段的情况，从openai标准字段中提取参数。
+		imageRequest.Parameters = AliImageParameters{
+			Size:      strings.Replace(request.Size, "x", "*", -1),
+			N:         int(lo.FromPtrOr(request.N, uint(1))),
+			Watermark: request.Watermark,
+		}
+	}
+	if isQwenImageModel(request.Model) && request.Extra != nil {
+		applyAliImageTopLevelParameters(&imageRequest.Parameters, request.Extra)
 	}
 
 	if strings.Contains(request.Model, "z-image") {
@@ -57,22 +65,18 @@ func oaiImage2AliImageRequest(info *relaycommon.RelayInfo, request dto.ImageRequ
 	if imageRequest.Parameters.N != 0 {
 		info.PriceData.AddOtherRatio("n", float64(imageRequest.Parameters.N))
 	}
+	if ratio := qwenImageOutputRatio(request.Model, imageRequest.Parameters.Size); ratio > 1 {
+		info.PriceData.AddOtherRatio("size", ratio)
+	}
 
 	// 同步图片模型和异步图片模型请求格式不一样
 	if isSync {
 		if imageRequest.Input == nil {
-			imageRequest.Input = AliImageInput{
-				Messages: []AliMessage{
-					{
-						Role: "user",
-						Content: []AliMediaContent{
-							{
-								Text: request.Prompt,
-							},
-						},
-					},
-				},
+			input, err := buildAliImageSyncInput(request)
+			if err != nil {
+				return nil, err
 			}
+			imageRequest.Input = input
 		}
 	} else {
 		if imageRequest.Input == nil {
@@ -83,6 +87,101 @@ func oaiImage2AliImageRequest(info *relaycommon.RelayInfo, request dto.ImageRequ
 	}
 
 	return &imageRequest, nil
+}
+
+// qwenImageOutputRatio applies the documented 3.0 Pro output price tiers.
+// The 1K tier covers output areas up to 2,250,000 pixels; larger outputs are
+// billed as 2K. Other Qwen Image models have a single output price tier.
+func qwenImageOutputRatio(model, size string) float64 {
+	if !strings.EqualFold(strings.TrimSpace(model), "qwen-image-3.0-pro") {
+		return 1
+	}
+	size = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(size, "x", "*"), "X", "*"))
+	parts := strings.Split(size, "*")
+	if len(parts) != 2 {
+		return 1
+	}
+	width, errWidth := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, errHeight := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if errWidth != nil || errHeight != nil || width <= 0 || height <= 0 {
+		return 1
+	}
+	if width*height > 2250000 {
+		return 2
+	}
+	return 1
+}
+
+// applyAliImageTopLevelParameters maps the extension fields accepted by the
+// Qwen Image OpenAI-compatible API into the nested DashScope parameters object.
+// The standard OpenAI ImageRequest keeps unknown fields in Extra, so without
+// this mapping fields such as negative_prompt and seed would be silently lost.
+func applyAliImageTopLevelParameters(parameters *AliImageParameters, extra map[string]json.RawMessage) {
+	if parameters == nil {
+		return
+	}
+	if value, ok := extra["negative_prompt"]; ok && parameters.NegativePrompt == "" {
+		_ = common.Unmarshal(value, &parameters.NegativePrompt)
+	}
+	if value, ok := extra["seed"]; ok && parameters.Seed == nil {
+		var seed int
+		if common.Unmarshal(value, &seed) == nil {
+			parameters.Seed = &seed
+		}
+	}
+	if value, ok := extra["prompt_extend"]; ok && parameters.PromptExtend == nil {
+		var promptExtend bool
+		if common.Unmarshal(value, &promptExtend) == nil {
+			parameters.PromptExtend = &promptExtend
+		}
+	}
+	if value, ok := extra["prompt_extend_mode"]; ok && parameters.PromptExtendMode == "" {
+		_ = common.Unmarshal(value, &parameters.PromptExtendMode)
+	}
+	if value, ok := extra["enable_thinking"]; ok && parameters.EnableThinking == nil {
+		var enableThinking bool
+		if common.Unmarshal(value, &enableThinking) == nil {
+			parameters.EnableThinking = &enableThinking
+		}
+	}
+}
+
+func buildAliImageSyncInput(request dto.ImageRequest) (AliImageInput, error) {
+	content := make([]AliMediaContent, 0, 4)
+	if isQwenImageModel(request.Model) {
+		for _, image := range aliImageInputs(request) {
+			if strings.TrimSpace(image) != "" {
+				content = append(content, AliMediaContent{Image: image})
+			}
+		}
+	}
+	if len(content) > 3 {
+		return AliImageInput{}, errors.New("qwen-image supports at most 3 input images")
+	}
+	content = append(content, AliMediaContent{Text: request.Prompt})
+	return AliImageInput{Messages: []AliMessage{{Role: "user", Content: content}}}, nil
+}
+
+func aliImageInputs(request dto.ImageRequest) []string {
+	var images []string
+	if len(request.Image) > 0 && string(request.Image) != "null" {
+		var image string
+		if common.Unmarshal(request.Image, &image) == nil {
+			images = append(images, image)
+		} else {
+			var imageList []string
+			if common.Unmarshal(request.Image, &imageList) == nil {
+				images = append(images, imageList...)
+			}
+		}
+	}
+	if len(request.Images) > 0 && string(request.Images) != "null" {
+		var imageList []string
+		if common.Unmarshal(request.Images, &imageList) == nil {
+			images = append(images, imageList...)
+		}
+	}
+	return images
 }
 func getImageBase64sFromForm(c *gin.Context, fieldName string) ([]string, error) {
 	mf := c.Request.MultipartForm

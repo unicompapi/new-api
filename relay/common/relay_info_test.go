@@ -103,3 +103,24 @@ func TestTaskSubmitReqMergeDashScopeParametersFromMetadata(t *testing.T) {
 	require.Equal(t, 8, req.Duration)
 	require.Equal(t, "16:9", req.Metadata["ratio"])
 }
+
+func TestTaskSubmitReqHasInputMediaIncludesTypedMedia(t *testing.T) {
+	req := TaskSubmitReq{Media: []TaskMediaItem{{Type: "reference_video", URL: "https://example.com/ref.mp4"}}}
+	require.True(t, req.HasInputMedia())
+	require.False(t, req.HasImage())
+	req = TaskSubmitReq{Metadata: map[string]interface{}{
+		"input": map[string]interface{}{
+			"media": []interface{}{map[string]interface{}{"type": "reference_image"}},
+		},
+	}}
+	require.True(t, req.HasInputMedia())
+}
+
+func TestSupportsMediaOnlyTaskForWan3(t *testing.T) {
+	req := TaskSubmitReq{Model: "wan3.0-video", Media: []TaskMediaItem{{Type: "file", URL: "https://example.com/ref.pdf"}}}
+	require.True(t, supportsMediaOnlyTask(req, nil))
+	require.True(t, req.HasInputMedia())
+
+	req.Model = "happyhorse-1.1-i2v"
+	require.False(t, supportsMediaOnlyTask(req, nil))
+}

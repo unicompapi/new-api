@@ -6,6 +6,9 @@ var ModelList = []string{
 	"wan2.2-i2v-plus",    // 万相2.2专业版（无声视频）
 	"wanx2.1-i2v-plus",   // 万相2.1专业版（无声视频）
 	"wanx2.1-i2v-turbo",  // 万相2.1极速版（无声视频）
+	// Wan 3.0 All-in-One（文生、首帧/首尾帧、全模态参考）
+	"wan3.0-video",
+	"wan3.0-video-prime",
 	// happyhorse 系列（按秒计费，720P 基准 0.9 元/秒）
 	"happyhorse-1.1-t2v",
 	"happyhorse-1.0-t2v",

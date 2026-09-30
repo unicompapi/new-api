@@ -754,6 +754,47 @@ func (t *TaskSubmitReq) HasImage() bool {
 	return false
 }
 
+// HasInputMedia reports whether the request contains any typed media. Unlike
+// HasImage, this also covers video/audio/file/link media used by all-in-one
+// video models.
+func (t *TaskSubmitReq) HasInputMedia() bool {
+	if len(t.Media) > 0 || t.HasImage() {
+		return true
+	}
+	for _, item := range t.Content {
+		if item.VideoURL != nil || item.AudioURL != nil {
+			return true
+		}
+	}
+	if t.Metadata == nil {
+		return false
+	}
+	if content, ok := t.Metadata["content"].([]interface{}); ok {
+		for _, entry := range content {
+			item, ok := entry.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if item["image_url"] != nil || item["video_url"] != nil || item["audio_url"] != nil {
+				return true
+			}
+			switch item["type"] {
+			case "image", "image_url", "video", "video_url", "audio", "audio_url":
+				return true
+			}
+		}
+	}
+	if media, ok := t.Metadata["media"].([]interface{}); ok && len(media) > 0 {
+		return true
+	}
+	if input, ok := t.Metadata["input"].(map[string]interface{}); ok {
+		if media, ok := input["media"].([]interface{}); ok && len(media) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // volcengineTopLevelTaskParamKeys are Seedance fields allowed at the JSON root
 // (official Volcengine API shape) and forwarded into metadata for task adaptors.
 var volcengineTopLevelTaskParamKeys = []string{

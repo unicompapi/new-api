@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/samber/lo"
 
 	"github.com/gin-gonic/gin"
@@ -35,14 +36,14 @@ type AliVideoRequest struct {
 
 // AliVideoInput 视频输入参数
 type AliVideoInput struct {
-	Prompt         string         `json:"prompt,omitempty"`          // 文本提示词
-	ImgURL         string         `json:"img_url,omitempty"`         // 首帧图像URL或Base64（图生视频）
-	FirstFrameURL  string         `json:"first_frame_url,omitempty"` // 首帧图片URL（首尾帧生视频）
-	LastFrameURL   string         `json:"last_frame_url,omitempty"`  // 尾帧图片URL（首尾帧生视频）
-	AudioURL       string         `json:"audio_url,omitempty"`       // 音频URL（wan2.5支持）
-	NegativePrompt string         `json:"negative_prompt,omitempty"` // 反向提示词
-	Template       string         `json:"template,omitempty"`        // 视频特效模板
-	Media          []AliVideoMidia `json:"media,omitempty"` // 参考素材数组（r2v 等）：first_frame / reference_image / reference_video
+	Prompt         string          `json:"prompt,omitempty"`          // 文本提示词
+	ImgURL         string          `json:"img_url,omitempty"`         // 首帧图像URL或Base64（图生视频）
+	FirstFrameURL  string          `json:"first_frame_url,omitempty"` // 首帧图片URL（首尾帧生视频）
+	LastFrameURL   string          `json:"last_frame_url,omitempty"`  // 尾帧图片URL（首尾帧生视频）
+	AudioURL       string          `json:"audio_url,omitempty"`       // 音频URL（wan2.5支持）
+	NegativePrompt string          `json:"negative_prompt,omitempty"` // 反向提示词
+	Template       string          `json:"template,omitempty"`        // 视频特效模板
+	Media          []AliVideoMidia `json:"media,omitempty"`           // 参考素材数组（r2v 等）：first_frame / reference_image / reference_video
 }
 
 // AliVideoMidia 参考媒体项
@@ -56,10 +57,10 @@ type AliVideoParameters struct {
 	Resolution   string `json:"resolution,omitempty"`    // 分辨率: 480P/720P/1080P（图生视频、首尾帧生视频）
 	Size         string `json:"size,omitempty"`          // 尺寸: 如 "832*480"（文生视频）
 	Duration     int    `json:"duration,omitempty"`      // 时长: 3-10秒
-	PromptExtend bool   `json:"prompt_extend,omitempty"` // 是否开启prompt智能改写
-	Watermark    bool   `json:"watermark,omitempty"`     // 是否添加水印
+	PromptExtend *bool  `json:"prompt_extend,omitempty"` // 是否开启prompt智能改写
+	Watermark    *bool  `json:"watermark,omitempty"`     // 是否添加水印
 	Audio        *bool  `json:"audio,omitempty"`         // 是否添加音频（wan2.5）
-	Seed         int    `json:"seed,omitempty"`          // 随机数种子
+	Seed         *int   `json:"seed,omitempty"`          // 随机数种子
 	Ratio        string `json:"ratio,omitempty"`         // 宽高比: 如 "16:9"（文生视频）
 }
 
@@ -118,8 +119,8 @@ type AliMetadata struct {
 }
 
 type aliMetadataEnvelope struct {
-	Input      *AliVideoInput       `json:"input,omitempty"`
-	Parameters *AliVideoParameters  `json:"parameters,omitempty"`
+	Input      *AliVideoInput      `json:"input,omitempty"`
+	Parameters *AliVideoParameters `json:"parameters,omitempty"`
 	AliMetadata
 }
 
@@ -225,6 +226,20 @@ func isHappyHorseModel(model string) bool {
 	return strings.Contains(strings.ToLower(model), "happyhorse")
 }
 
+func isWan3Model(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "wan3.0-video", "wan3.0-video-prime":
+		return true
+	default:
+		return false
+	}
+}
+
+func isHappyHorseModelType(model, modelType string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return isHappyHorseModel(model) && strings.Contains(model, "-"+modelType)
+}
+
 func metadataIntValue(v interface{}) int {
 	switch n := v.(type) {
 	case float64:
@@ -280,6 +295,18 @@ func ProcessAliOtherRatios(aliReq *AliVideoRequest, originModelName string) (map
 		return otherRatios, nil
 	}
 
+	if isWan3Model(originModelName) || isWan3Model(aliReq.Model) {
+		wan3Ratios := map[string]float64{
+			"480P":  0.5,
+			"720P":  1,
+			"1080P": 2,
+		}
+		if ratio, ok := wan3Ratios[resolution]; ok {
+			otherRatios[fmt.Sprintf("resolution-%s", resolution)] = ratio
+		}
+		return otherRatios, nil
+	}
+
 	aliRatios := map[string]map[string]float64{
 		"wan2.6-i2v": {
 			"720P":  1,
@@ -327,12 +354,21 @@ func ProcessAliOtherRatios(aliReq *AliVideoRequest, originModelName string) (map
 
 var validAliRatios = []string{"16:9", "9:16", "1:1", "4:3", "3:4"}
 
+var validWan3Ratios = []string{"adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"}
+
 func isAliRatioFormat(s string) bool {
 	s = strings.TrimSpace(s)
 	return lo.Contains(validAliRatios, s)
 }
 
+func isWan3RatioFormat(s string) bool {
+	return lo.Contains(validWan3Ratios, strings.ToLower(strings.TrimSpace(s)))
+}
+
 func aliUsesRatioParam(model string) bool {
+	if isWan3Model(model) {
+		return true
+	}
 	if isHappyHorseModel(model) && (strings.Contains(model, "t2v") || strings.Contains(model, "r2v")) {
 		return true
 	}
@@ -344,7 +380,8 @@ func aliUsesRatioParam(model string) bool {
 }
 
 func aliUsesMediaArray(model string) bool {
-	return strings.Contains(model, "r2v") || strings.Contains(model, "wan2.7") || (isHappyHorseModel(model) && strings.Contains(model, "r2v"))
+	model = strings.ToLower(model)
+	return isWan3Model(model) || strings.Contains(model, "r2v") || strings.Contains(model, "wan2.7") || isHappyHorseModelType(model, "i2v")
 }
 
 func collectTaskImages(req relaycommon.TaskSubmitReq) []string {
@@ -368,6 +405,68 @@ func collectTaskImages(req relaycommon.TaskSubmitReq) []string {
 		}
 	}
 	return lo.Uniq(images)
+}
+
+func appendWan3ContentMedia(input *AliVideoInput, req relaycommon.TaskSubmitReq) {
+	content := req.Content
+	if len(content) == 0 && req.Metadata != nil {
+		if raw, ok := req.Metadata["content"]; ok {
+			if data, err := common.Marshal(raw); err == nil {
+				_ = common.Unmarshal(data, &content)
+			}
+		}
+	}
+	appendWan3ContentItems(input, content)
+}
+
+func appendWan3ContentItems(input *AliVideoInput, content []relaycommon.TaskContentItem) {
+	imageCount := 0
+	hasOtherMedia := false
+	for _, item := range content {
+		switch strings.ToLower(strings.TrimSpace(item.Type)) {
+		case "image", "image_url":
+			if item.ImageURL != nil {
+				imageCount++
+			}
+		case "video", "video_url", "audio", "audio_url":
+			hasOtherMedia = true
+		}
+	}
+
+	for _, item := range content {
+		mediaType := ""
+		switch strings.ToLower(strings.TrimSpace(item.Type)) {
+		case "image", "image_url":
+			if imageCount == 1 && !hasOtherMedia {
+				mediaType = "first_frame"
+			} else {
+				mediaType = "reference_image"
+			}
+		case "video", "video_url":
+			mediaType = "reference_video"
+		case "audio", "audio_url":
+			mediaType = "reference_audio"
+		default:
+			// Some callers already provide the Wan media type in role. Ignore
+			// ordinary chat roles such as "user" and "assistant".
+			role := strings.ToLower(strings.TrimSpace(item.Role))
+			if lo.Contains([]string{"first_frame", "last_frame", "reference_image", "reference_video", "reference_audio", "file", "link"}, role) {
+				mediaType = role
+			}
+		}
+		var url string
+		switch {
+		case item.ImageURL != nil:
+			url = item.ImageURL.URL
+		case item.VideoURL != nil:
+			url = item.VideoURL.URL
+		case item.AudioURL != nil:
+			url = item.AudioURL.URL
+		}
+		if mediaType != "" && strings.TrimSpace(url) != "" {
+			input.Media = append(input.Media, AliVideoMidia{Type: mediaType, Url: strings.TrimSpace(url)})
+		}
+	}
 }
 
 func normalizeAliResolution(resolution string) string {
@@ -409,12 +508,60 @@ func aspectRatioFromPixelSize(size string) string {
 	}
 }
 
-func applyTaskImages(aliReq *AliVideoRequest, model string, images []string) {
+func applyTaskImages(aliReq *AliVideoRequest, model string, images []string) error {
 	if len(images) == 0 {
-		return
+		return nil
 	}
 	if len(aliReq.Input.Media) > 0 {
-		return
+		return nil
+	}
+
+	if isHappyHorseModelType(model, "t2v") {
+		return fmt.Errorf("%s does not support image inputs", model)
+	}
+	if isHappyHorseModelType(model, "i2v") {
+		if len(images) != 1 {
+			return fmt.Errorf("%s requires exactly one image input", model)
+		}
+		aliReq.Input.Media = []AliVideoMidia{{
+			Type: "first_frame",
+			Url:  images[0],
+		}}
+		return nil
+	}
+	if isHappyHorseModelType(model, "r2v") {
+		for _, url := range images {
+			aliReq.Input.Media = append(aliReq.Input.Media, AliVideoMidia{
+				Type: "reference_image",
+				Url:  url,
+			})
+		}
+		return nil
+	}
+	if isWan3Model(model) {
+		// The legacy images field has no media type. Treat one image as a
+		// first frame, two images as first/last frames, and larger batches as
+		// reference images. Callers needing mixed media should use typed media.
+		if len(images) > 2 {
+			for _, url := range images {
+				aliReq.Input.Media = append(aliReq.Input.Media, AliVideoMidia{
+					Type: "reference_image",
+					Url:  url,
+				})
+			}
+			return nil
+		}
+		aliReq.Input.Media = append(aliReq.Input.Media, AliVideoMidia{
+			Type: "first_frame",
+			Url:  images[0],
+		})
+		if len(images) == 2 {
+			aliReq.Input.Media = append(aliReq.Input.Media, AliVideoMidia{
+				Type: "last_frame",
+				Url:  images[1],
+			})
+		}
+		return nil
 	}
 	if aliUsesMediaArray(model) {
 		for i, url := range images {
@@ -427,7 +574,7 @@ func applyTaskImages(aliReq *AliVideoRequest, model string, images []string) {
 				Url:  url,
 			})
 		}
-		return
+		return nil
 	}
 	if strings.Contains(model, "kf2v") {
 		if aliReq.Input.FirstFrameURL == "" {
@@ -436,11 +583,185 @@ func applyTaskImages(aliReq *AliVideoRequest, model string, images []string) {
 		if len(images) > 1 && aliReq.Input.LastFrameURL == "" {
 			aliReq.Input.LastFrameURL = images[1]
 		}
-		return
+		return nil
 	}
 	if aliReq.Input.ImgURL == "" {
 		aliReq.Input.ImgURL = images[0]
 	}
+	return nil
+}
+
+func normalizeHappyHorseInput(aliReq *AliVideoRequest) error {
+	if !isHappyHorseModel(aliReq.Model) {
+		return nil
+	}
+
+	input := &aliReq.Input
+	legacyInput := input.ImgURL != "" || input.FirstFrameURL != "" || input.LastFrameURL != ""
+	switch {
+	case isHappyHorseModelType(aliReq.Model, "t2v"):
+		if len(input.Media) > 0 || legacyInput {
+			return fmt.Errorf("%s only supports prompt input", aliReq.Model)
+		}
+	case isHappyHorseModelType(aliReq.Model, "i2v"):
+		if len(input.Media) == 0 {
+			imageURL := input.ImgURL
+			if imageURL == "" {
+				imageURL = input.FirstFrameURL
+			}
+			if imageURL != "" {
+				input.Media = []AliVideoMidia{{Type: "first_frame", Url: imageURL}}
+			}
+		}
+		if len(input.Media) == 0 {
+			return fmt.Errorf("%s requires one first_frame image input", aliReq.Model)
+		}
+		if len(input.Media) > 1 {
+			return fmt.Errorf("%s requires exactly one first_frame image input", aliReq.Model)
+		}
+		media := &input.Media[0]
+		media.Url = strings.TrimSpace(media.Url)
+		if media.Url == "" {
+			return fmt.Errorf("%s requires a non-empty first_frame image URL", aliReq.Model)
+		}
+		mediaType := strings.ToLower(strings.TrimSpace(media.Type))
+		if mediaType == "" {
+			mediaType = "first_frame"
+		}
+		if mediaType != "first_frame" {
+			return fmt.Errorf("%s requires media type first_frame", aliReq.Model)
+		}
+		media.Type = mediaType
+		input.ImgURL = ""
+		input.FirstFrameURL = ""
+		input.LastFrameURL = ""
+	case isHappyHorseModelType(aliReq.Model, "r2v"):
+		if len(input.Media) == 0 {
+			imageURL := input.ImgURL
+			if imageURL == "" {
+				imageURL = input.FirstFrameURL
+			}
+			if imageURL != "" {
+				input.Media = []AliVideoMidia{{Type: "reference_image", Url: imageURL}}
+			}
+		}
+		if len(input.Media) == 0 {
+			return fmt.Errorf("%s requires at least one reference_image input", aliReq.Model)
+		}
+		if len(input.Media) > 10 {
+			return fmt.Errorf("%s supports at most 10 reference_image inputs", aliReq.Model)
+		}
+		for i := range input.Media {
+			media := &input.Media[i]
+			media.Url = strings.TrimSpace(media.Url)
+			if media.Url == "" {
+				return fmt.Errorf("%s requires non-empty reference_image URLs", aliReq.Model)
+			}
+			mediaType := strings.ToLower(strings.TrimSpace(media.Type))
+			if mediaType == "" {
+				mediaType = "reference_image"
+			}
+			if mediaType != "reference_image" {
+				return fmt.Errorf("%s requires media type reference_image", aliReq.Model)
+			}
+			media.Type = mediaType
+		}
+		input.ImgURL = ""
+		input.FirstFrameURL = ""
+		input.LastFrameURL = ""
+	}
+	return nil
+}
+
+// normalizeWan3Input converts legacy image/audio fields to the typed media
+// format required by Wan 3.0 and validates the media combinations documented
+// by DashScope.
+func normalizeWan3Input(aliReq *AliVideoRequest) error {
+	if !isWan3Model(aliReq.Model) {
+		return nil
+	}
+
+	input := &aliReq.Input
+	if len(input.Media) == 0 {
+		firstURL := strings.TrimSpace(input.FirstFrameURL)
+		if firstURL == "" {
+			firstURL = strings.TrimSpace(input.ImgURL)
+		}
+		if firstURL != "" {
+			input.Media = append(input.Media, AliVideoMidia{Type: "first_frame", Url: firstURL})
+		}
+		if lastURL := strings.TrimSpace(input.LastFrameURL); lastURL != "" {
+			input.Media = append(input.Media, AliVideoMidia{Type: "last_frame", Url: lastURL})
+		}
+		if audioURL := strings.TrimSpace(input.AudioURL); audioURL != "" {
+			input.Media = append(input.Media, AliVideoMidia{Type: "reference_audio", Url: audioURL})
+		}
+	}
+
+	// These legacy fields are not part of the Wan 3.0 input schema. A media
+	// value above has already converted the compatible legacy fields.
+	input.ImgURL = ""
+	input.FirstFrameURL = ""
+	input.LastFrameURL = ""
+	input.AudioURL = ""
+	if input.NegativePrompt != "" || input.Template != "" {
+		return fmt.Errorf("%s does not support negative_prompt or template input fields", aliReq.Model)
+	}
+	input.NegativePrompt = ""
+	input.Template = ""
+
+	if strings.TrimSpace(input.Prompt) == "" && len(input.Media) == 0 {
+		return fmt.Errorf("%s requires prompt or input.media", aliReq.Model)
+	}
+
+	counts := map[string]int{}
+	for i := range input.Media {
+		media := &input.Media[i]
+		media.Type = strings.ToLower(strings.TrimSpace(media.Type))
+		media.Url = strings.TrimSpace(media.Url)
+		if !lo.Contains([]string{"first_frame", "last_frame", "reference_image", "reference_video", "reference_audio", "file", "link"}, media.Type) {
+			return fmt.Errorf("%s does not support media type %q", aliReq.Model, media.Type)
+		}
+		if media.Url == "" {
+			return fmt.Errorf("%s requires a non-empty URL for media type %s", aliReq.Model, media.Type)
+		}
+		counts[media.Type]++
+	}
+
+	if counts["first_frame"] > 1 || counts["last_frame"] > 1 {
+		return fmt.Errorf("%s accepts at most one first_frame and one last_frame", aliReq.Model)
+	}
+	if counts["reference_image"] > 10 {
+		return fmt.Errorf("%s accepts at most 10 reference_image inputs", aliReq.Model)
+	}
+	if counts["reference_video"] > 5 {
+		return fmt.Errorf("%s accepts at most 5 reference_video inputs", aliReq.Model)
+	}
+	if counts["reference_audio"] > 5 {
+		return fmt.Errorf("%s accepts at most 5 reference_audio inputs", aliReq.Model)
+	}
+	if counts["file"] > 1 || counts["link"] > 1 {
+		return fmt.Errorf("%s accepts at most one file and one link input", aliReq.Model)
+	}
+	if (counts["file"] > 0 || counts["link"] > 0) && !boolParameterValue(aliReq.Parameters.PromptExtend, true) {
+		return fmt.Errorf("%s requires prompt_extend=true when file or link media is provided", aliReq.Model)
+	}
+
+	frameCount := counts["first_frame"] + counts["last_frame"]
+	referenceCount := counts["reference_image"] + counts["reference_video"] + counts["reference_audio"] + counts["file"] + counts["link"]
+	if frameCount > 0 && referenceCount > 0 {
+		return fmt.Errorf("%s cannot mix first_frame/last_frame with reference media", aliReq.Model)
+	}
+	if counts["file"] > 0 && counts["link"] > 0 {
+		return fmt.Errorf("%s cannot mix file and link media", aliReq.Model)
+	}
+	if counts["last_frame"] > 0 && counts["first_frame"] == 0 {
+		return fmt.Errorf("%s requires first_frame when last_frame is provided", aliReq.Model)
+	}
+	if len(input.Media) > 20 {
+		return fmt.Errorf("%s accepts at most 20 media inputs", aliReq.Model)
+	}
+	return nil
 }
 
 func mergeAliInput(dst *AliVideoInput, src AliVideoInput) {
@@ -480,15 +801,61 @@ func mergeAliParameters(dst *AliVideoParameters, src AliVideoParameters) {
 	if src.Ratio != "" {
 		dst.Ratio = src.Ratio
 	}
-	if src.Duration > 0 {
+	if src.Duration != 0 {
 		dst.Duration = src.Duration
 	}
-	if src.Seed > 0 {
+	if src.Seed != nil {
 		dst.Seed = src.Seed
 	}
 	if src.Audio != nil {
 		dst.Audio = src.Audio
 	}
+	// Pointer fields preserve explicit false values from nested metadata.
+	if src.PromptExtend != nil {
+		dst.PromptExtend = src.PromptExtend
+	}
+	if src.Watermark != nil {
+		dst.Watermark = src.Watermark
+	}
+}
+
+func applyNestedAliParameterOverrides(aliReq *AliVideoRequest, metadata map[string]interface{}) {
+	if aliReq == nil || aliReq.Parameters == nil || metadata == nil {
+		return
+	}
+	params, ok := metadata["parameters"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	if value, exists := params["prompt_extend"]; exists {
+		if enabled, ok := metadataBool(value); ok {
+			aliReq.Parameters.PromptExtend = common.GetPointer(enabled)
+		}
+	}
+	if value, exists := params["watermark"]; exists {
+		if enabled, ok := metadataBool(value); ok {
+			aliReq.Parameters.Watermark = common.GetPointer(enabled)
+		}
+	}
+}
+
+func metadataBool(value interface{}) (bool, bool) {
+	switch v := value.(type) {
+	case bool:
+		return v, true
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(v))
+		return parsed, err == nil
+	default:
+		return false, false
+	}
+}
+
+func boolParameterValue(value *bool, defaultValue bool) bool {
+	if value == nil {
+		return defaultValue
+	}
+	return *value
 }
 
 func applyAliFlatMetadata(aliReq *AliVideoRequest, meta AliMetadata) {
@@ -522,20 +889,20 @@ func applyAliFlatMetadata(aliReq *AliVideoRequest, meta AliMetadata) {
 	if meta.Ratio != nil && *meta.Ratio != "" {
 		aliReq.Parameters.Ratio = *meta.Ratio
 	}
-	if meta.Duration != nil && *meta.Duration > 0 {
+	if meta.Duration != nil && (*meta.Duration > 0 || (isWan3Model(aliReq.Model) && *meta.Duration == -1)) {
 		aliReq.Parameters.Duration = *meta.Duration
 	}
 	if meta.PromptExtend != nil {
-		aliReq.Parameters.PromptExtend = *meta.PromptExtend
+		aliReq.Parameters.PromptExtend = meta.PromptExtend
 	}
 	if meta.Watermark != nil {
-		aliReq.Parameters.Watermark = *meta.Watermark
+		aliReq.Parameters.Watermark = meta.Watermark
 	}
 	if meta.Audio != nil {
 		aliReq.Parameters.Audio = meta.Audio
 	}
-	if meta.Seed != nil && *meta.Seed > 0 {
-		aliReq.Parameters.Seed = *meta.Seed
+	if meta.Seed != nil {
+		aliReq.Parameters.Seed = meta.Seed
 	}
 }
 
@@ -550,13 +917,26 @@ func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relay
 			Prompt: req.Prompt,
 		},
 		Parameters: &AliVideoParameters{
-			PromptExtend: true,
-			Watermark:    false,
+			PromptExtend: common.GetPointer(true),
+			Watermark:    common.GetPointer(false),
 		},
+	}
+	for _, media := range req.Media {
+		if url := strings.TrimSpace(media.URL); url != "" {
+			aliReq.Input.Media = append(aliReq.Input.Media, AliVideoMidia{
+				Type: strings.TrimSpace(media.Type),
+				Url:  url,
+			})
+		}
+	}
+	if isWan3Model(upstreamModel) {
+		appendWan3ContentMedia(&aliReq.Input, req)
 	}
 
 	images := collectTaskImages(req)
-	applyTaskImages(aliReq, upstreamModel, images)
+	if err := applyTaskImages(aliReq, upstreamModel, images); err != nil {
+		return nil, err
+	}
 
 	// size / resolution / ratio
 	sizeValue := strings.TrimSpace(req.Size)
@@ -565,8 +945,15 @@ func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relay
 	}
 	if sizeValue != "" {
 		switch {
-		case isAliRatioFormat(sizeValue):
+		case isAliRatioFormat(sizeValue) || (isWan3Model(upstreamModel) && isWan3RatioFormat(sizeValue)):
 			aliReq.Parameters.Ratio = sizeValue
+		case isWan3Model(upstreamModel) && (strings.Contains(sizeValue, "*") || strings.Contains(sizeValue, "x") || strings.Contains(sizeValue, "X")):
+			normalizedSize := strings.ReplaceAll(strings.ReplaceAll(sizeValue, "*", "x"), "X", "x")
+			if ratio := aspectRatioFromPixelSize(normalizedSize); ratio != "" {
+				aliReq.Parameters.Ratio = ratio
+			} else {
+				return nil, fmt.Errorf("invalid size: %s", sizeValue)
+			}
 		case strings.Contains(sizeValue, "*"):
 			if strings.Contains(upstreamModel, "t2v") && !isHappyHorseModel(upstreamModel) {
 				aliReq.Parameters.Size = sizeValue
@@ -597,7 +984,10 @@ func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relay
 	} else if strings.TrimSpace(req.Resolution) != "" {
 		aliReq.Parameters.Resolution = normalizeAliResolution(req.Resolution)
 	} else {
-		if strings.Contains(upstreamModel, "t2v") {
+		if isWan3Model(upstreamModel) {
+			aliReq.Parameters.Resolution = "1080P"
+			aliReq.Parameters.Ratio = "adaptive"
+		} else if strings.Contains(upstreamModel, "t2v") {
 			if aliUsesRatioParam(upstreamModel) {
 				aliReq.Parameters.Ratio = "16:9"
 				aliReq.Parameters.Resolution = "720P"
@@ -622,7 +1012,7 @@ func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relay
 		}
 	}
 
-	if req.Duration > 0 {
+	if req.Duration != 0 {
 		aliReq.Parameters.Duration = req.Duration
 	} else if req.Seconds != "" {
 		seconds, err := strconv.Atoi(req.Seconds)
@@ -645,6 +1035,7 @@ func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relay
 		if envelope.Parameters != nil {
 			mergeAliParameters(aliReq.Parameters, *envelope.Parameters)
 		}
+		applyNestedAliParameterOverrides(aliReq, req.Metadata)
 		applyAliFlatMetadata(aliReq, envelope.AliMetadata)
 	}
 
@@ -653,12 +1044,96 @@ func (a *TaskAdaptor) convertToAliRequest(info *relaycommon.RelayInfo, req relay
 	}
 
 	if len(aliReq.Input.Media) == 0 && len(images) > 0 {
-		applyTaskImages(aliReq, upstreamModel, images)
+		if err := applyTaskImages(aliReq, upstreamModel, images); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := normalizeHappyHorseInput(aliReq); err != nil {
+		return nil, err
+	}
+	if err := normalizeWan3Input(aliReq); err != nil {
+		return nil, err
+	}
+	if err := finalizeWan3Parameters(aliReq); err != nil {
+		return nil, err
 	}
 
 	finalizeHappyHorseParameters(req, aliReq)
 
 	return aliReq, nil
+}
+
+func finalizeWan3Parameters(aliReq *AliVideoRequest) error {
+	if !isWan3Model(aliReq.Model) {
+		return nil
+	}
+
+	resolution := normalizeAliResolution(aliReq.Parameters.Resolution)
+	if resolution == "" {
+		resolution = "1080P"
+	}
+	if resolution != "480P" && resolution != "720P" && resolution != "1080P" {
+		return fmt.Errorf("%s does not support resolution %q", aliReq.Model, aliReq.Parameters.Resolution)
+	}
+	aliReq.Parameters.Resolution = resolution
+
+	ratio := strings.ToLower(strings.TrimSpace(aliReq.Parameters.Ratio))
+	if ratio == "" {
+		ratio = "adaptive"
+	}
+	if !isWan3RatioFormat(ratio) {
+		return fmt.Errorf("%s does not support ratio %q", aliReq.Model, aliReq.Parameters.Ratio)
+	}
+	aliReq.Parameters.Ratio = ratio
+
+	if aliReq.Parameters.Duration == 0 {
+		aliReq.Parameters.Duration = 5
+	}
+	if aliReq.Parameters.Duration != -1 && (aliReq.Parameters.Duration < 2 || aliReq.Parameters.Duration > 30) {
+		return fmt.Errorf("%s duration must be between 2 and 30 seconds or -1", aliReq.Model)
+	}
+	if aliReq.Parameters.Seed != nil && (*aliReq.Parameters.Seed < -1 || *aliReq.Parameters.Seed > 2147483647) {
+		return fmt.Errorf("%s seed must be -1 or between 0 and 2147483647", aliReq.Model)
+	}
+	return nil
+}
+
+// AdjustBillingOnComplete settles Wan 3.0 against the duration reported by
+// DashScope. For reference-video requests, usage.duration includes both input
+// and output duration, matching the provider's billing definition.
+func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, _ *relaycommon.TaskInfo) int {
+	modelName := task.Properties.OriginModelName
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.OriginModelName != "" {
+		modelName = bc.OriginModelName
+	}
+	priceModelName := modelName
+	if !isWan3Model(priceModelName) && isWan3Model(task.Properties.UpstreamModelName) {
+		priceModelName = task.Properties.UpstreamModelName
+	}
+	if !isWan3Model(priceModelName) {
+		return 0
+	}
+
+	var response AliVideoResponse
+	if err := common.Unmarshal(task.Data, &response); err != nil || response.Usage.Duration <= 0 {
+		return 0
+	}
+
+	bc := task.PrivateData.BillingContext
+	if bc == nil || bc.ModelPrice <= 0 || bc.GroupRatio <= 0 {
+		return 0
+	}
+	resolutionRatio := 1.0
+	for key, ratio := range bc.OtherRatios {
+		if strings.HasPrefix(key, "resolution-") && ratio > 0 {
+			resolutionRatio = ratio
+			break
+		}
+	}
+
+	return int(ratio_setting.ModelPriceToUSD(priceModelName, bc.ModelPrice) *
+		common.QuotaPerUnit * bc.GroupRatio * response.Usage.Duration * resolutionRatio)
 }
 
 // finalizeHappyHorseParameters ensures happyhorse models always use parameters.resolution for upstream and billing.
@@ -719,9 +1194,13 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 		return nil
 	}
 
-	otherRatios := map[string]float64{
-		"seconds": happyHorseBillableSeconds(aliReq, taskReq),
+	seconds := happyHorseBillableSeconds(aliReq, taskReq)
+	if isWan3Model(aliReq.Model) && seconds < 0 {
+		// Wan 3.0's -1 means smart duration. Pre-charge against the documented
+		// 30-second maximum and settle to usage.duration when the task completes.
+		seconds = 30
 	}
+	otherRatios := map[string]float64{"seconds": seconds}
 	ratios, err := ProcessAliOtherRatios(aliReq, info.OriginModelName)
 	if err != nil {
 		return otherRatios

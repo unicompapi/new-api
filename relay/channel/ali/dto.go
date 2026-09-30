@@ -175,8 +175,11 @@ type AliImageParameters struct {
 	N                int    `json:"n,omitempty"`
 	Steps            string `json:"steps,omitempty"`
 	Scale            string `json:"scale,omitempty"`
+	NegativePrompt   string `json:"negative_prompt,omitempty"`
 	Watermark        *bool  `json:"watermark,omitempty"`
 	PromptExtend     *bool  `json:"prompt_extend,omitempty"`
+	PromptExtendMode string `json:"prompt_extend_mode,omitempty"`
+	EnableThinking   *bool  `json:"enable_thinking,omitempty"`
 	ThinkingMode     *bool  `json:"thinking_mode,omitempty"`
 	EnableSequential *bool  `json:"enable_sequential,omitempty"`
 	BboxList         any    `json:"bbox_list,omitempty"`
